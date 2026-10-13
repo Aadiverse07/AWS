@@ -1,0 +1,321 @@
+
+===== PAGE 1 =====
+Jarvis Decider MVP: Architecture, Roadmap
+and Folder Structure
+Trimmed plan for the AWS Agent Experience Hackathon (Strands Decider 2B). It replaces
+the earlier long plan. Nothing here assumes you already have a finished Jarvis or your own
+MCP server.
+1. The MVP in one page
+What it is. A decision-first agent. At each step a small, fast decision model (Strands
+Decider 2B) chooses among options, and a larger LLM is called only when the Decider's
+confidence is low or when real writing or planning is needed.
+Use case. A maintainer triage agent for solo open-source maintainers and student dev
+teams: read GitHub issues, decide what is actionable, research a fix, and draft a plan.
+What you actually build (the four things judges score):
+1. The decision engine: contract, thresholds, escalation (about 200 lines).
+2. A thin orchestrator loop that runs one decision step after another.
+3. The 50-task eval set and runner, on frozen fixtures so runs are free and reproducible.
+4. The trace view and the comparison chart.
+What you reuse (do not write):
+Agent framework: Strands Agents SDK (open source). Verify its current MCP client
+support in the docs.
+GitHub tools: GitHub's official MCP server. Verify current install steps and token
+scopes.
+Web fetch tools: an existing maintained MCP fetch server (check which ones in the
+official modelcontextprotocol/servers repo are still maintained).
+Decider model: open weights from Hugging Face (check the model card for the exact
+input and output format).
+Planner and escalation LLM: a small local model through Ollama.
+Backend and storage: FastAPI and SQLite.
+Dashboard: Streamlit.
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 1 of 9
+
+===== PAGE 2 =====
+2. What was cut from the big plan
+The upgrade path stays real because every paid or AWS option sits behind the same small
+interface as its free default.
+3. The decision contract
+Decider scores a list of options you supply. It does not plan or generate text. So every use
+follows one contract:
+DecisionRequest = { decision_id, question, context, options[], run_id, step }
+DecisionResult  = { chosen, scores, confidence, latency_ms, backend,
+                    escalated, final_choice, final_source }
+Escalation rule. If confidence >= threshold[decision_id] , use the Decider's choice.
+Otherwise send the same request to the LLM and use its answer. Thresholds live in
+configs/thresholds.yaml  and are tuned from eval data.
+MVP decision catalog:
+Big plan MVP
+4 agents 2 agents: Developer and Research. Drafting is a
+prompt in the synthesizer, not an agent
+4 custom MCP servers 0 custom servers. Existing servers only
+Many provider swaps 3 real interfaces: decider, model, storage. AWS
+versions are stubs, plus one working AWS
+touchpoint
+Decisions D0 to D6 Ship D1, D2, D4, D5, D6. D0 (playbooks) and D3
+(enough info?) are stretch
+React dashboard Streamlit
+CDK, Cognito, Step Functions Empty folders only
+Pack system with registries One pack folder, no plugin machinery
+ID Question Options
+D1 Which agent handles this step? developer, research
+D2 Which tool, from a shortlist of 5 to 8? tool names
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 2 of 9
+
+===== PAGE 3 =====
+Stretch: D0 (known playbook or needs planning) and D3 (proceed, ask_user,
+gather_more).
+Decider backends: local_hf  (default), llm_baseline  (the same choice made by a
+prompted LLM, used for the comparison), and mock  (rule-based, for tests and UI work). A
+remote_http  backend is a later upgrade.
+4. Architecture
+ Streamlit dashboard: run, decision trace, eval results
+            |
+   FastAPI (or direct Python call for the demo)
+            |
+   Orchestrator loop (Strands Agents)
+     1. intake -> planner LLM writes a plan of at most 5 steps
+     2. for each step:
+          D1 agent   -> shortlist tools -> D2 tool
+          D5 safety  -> execute via MCP (read-only) or draft
+          D4 result check -> retry / replan / next
+          any decision below threshold -> escalate to LLM
+     3. synthesizer LLM writes the final report and draft comment
+            |
+   Existing MCP servers: GitHub (official), web fetch
+            |
+   Trace log (JSONL + SQLite) -> dashboard + eval harness
+Components
+Decision engine. Builds the request, calls the active backend, applies the threshold,
+escalates, and writes a trace event for every decision.
+Orchestrator. Asks the planner LLM for a short structured plan, then runs the step
+loop. No playbooks in v1.
+Agents. Each is just a system prompt, an allowed-tool list and a result check.
+Shortlister. Keyword/BM25 scoring plus the agent's allow-list narrows all tools to 5 to 8
+before D2.
+ID Question Options
+D4 Did the tool result satisfy the step? satisfied, retry, replan
+D5 Is this action safe to run now? execute, draft_only, block
+D6 Should this go to the big LLM? stay_small, escalate
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 3 of 9
+
+===== PAGE 4 =====
+Guardrails. A small policy file lists tools that can never auto-run. Tool output is
+wrapped as untrusted data before any LLM sees it, and the GitHub token is read-only
+and redacted in traces.
+Synthesizer. One LLM call that turns evidence into a ranked answer with issue
+numbers and links. Comment drafts are shown, never posted.
+5. Free stack and upgrade path
+Cost safety (build on day one): default is COST_MODE=free . COST_MODE=production  also
+requires ALLOW_PAID=true , otherwise startup fails. Check current AWS pricing and free-
+tier terms yourself and set a budget alert before enabling any AWS service.
+6. Evaluation (your differentiator)
+Dataset. 50 tasks in eval/datasets/tasks_v1.jsonl . Each has an input, a frozen fixture
+repo, the expected agent and tool per step, success checks (for example "must name
+issue #14"), and a flag for tasks that must be drafted only or refused.
+Metrics. Agent accuracy, tool accuracy, task success, escalation rate, decision latency
+(p50, p95), LLM tokens per task, unsafe actions executed (target 0).
+The pitch chart. Run the same 50 tasks three ways:
+Layer Free default Upgrade Config switch
+Decision
+model
+Decider 2B local (or free
+Colab/Kaggle GPU for
+experiments)
+Hosted GPU
+endpoint
+decider.backend
+LLM Ollama small model Amazon Bedrock model.provider
+Storage SQLite DynamoDB storage.provider
+Tools Local MCP servers Hosted MCP later
+Telemetry JSONL + SQLite CloudWatch later
+Deploy Local Lambda or
+container
+later
+Setup Accuracy Latency LLM tokens
+LLM only ? ? ?
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 4 of 9
+
+===== PAGE 5 =====
+Also run a threshold sweep (accuracy vs escalation rate). If hybrid keeps near-LLM
+accuracy at much lower latency and token use, that is the headline. If not, a clear failure
+analysis is still a strong story. AWS's published Decider results are moderate in absolute
+accuracy, so frame it as confidence-aware routing, not a perfect model.
+7. Folder structure (MVP)
+jarvis-decider/
+├ ─ README.md                  # pitch, quickstart, results
+├ ─ pyproject.toml
+├ ─ Makefile                   # make dev | eval | demo
+├ ─ .env.example
+│
+├ ─ configs/
+│  ├ ─ cost_free.yaml          # local providers (default)
+│  ├ ─ cost_production.yaml    # AWS providers, needs ALLOW_PAID=true
+│  ├ ─ thresholds.yaml         # per-decision confidence thresholds
+│  └─ policy.yaml             # tool risk levels, never-auto-run list
+│
+├ ─ src/jarvis/
+│  ├ ─ config.py               # yaml + env, COST_MODE, cost guard
+│  ├ ─ types.py                # Run, Step, Event models
+│  │
+│  ├ ─ decision/               # BUILD: the core of the project
+│  │  ├ ─ contract.py          # DecisionRequest / DecisionResult
+│  │  ├ ─ catalog.py           # D1, D2, D4, D5, D6 options
+│  │  ├ ─ engine.py            # call backend, threshold, escalate
+│  │  ├ ─ calibration.py       # calibration and threshold tuning
+│  │  └─ backends/
+│  │     ├ ─ base.py           # DeciderProvider interface
+│  │     ├ ─ local_hf.py       # Decider 2B local weights
+│  │     ├ ─ llm_baseline.py   # prompted-LLM comparison
+│  │     └─ mock.py           # rule-based for tests/UI
+│  │
+│  ├ ─ orchestrator/
+│  │  ├ ─ loop.py              # the step loop
+│  │  ├ ─ planner.py           # LLM plan, max 5 steps
+│  │  └─ synthesizer.py       # final report + draft comment
+│  │
+Setup Accuracy Latency LLM tokens
+Decider only ? ? 0
+Hybrid (confidence escalation) ? ? ?
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 5 of 9
+
+===== PAGE 6 =====
+│  ├ ─ agents/
+│  │  ├ ─ base.py              # prompt, allowed tools, validator
+│  │  ├ ─ developer.py
+│  │  └─ research.py
+│  │
+│  ├ ─ tools/
+│  │  ├ ─ mcp_client.py        # connects to EXISTING MCP servers
+│  │  ├ ─ registry.py          # tool metadata, risk levels
+│  │  └─ shortlist.py         # BM25 now, embeddings later
+│  │
+│  ├ ─ providers/              # interface + free default only
+│  │  ├ ─ model/ {base.py, ollama.py, bedrock_stub.py}
+│  │  └─ storage/ {base.py, sqlite.py}
+│  │
+│  ├ ─ guardrails/
+│  │  ├ ─ policy.py            # D5 + hard rules
+│  │  ├ ─ untrusted.py         # wrap tool output as data
+│  │  └─ redaction.py         # secrets out of traces
+│  │
+│  ├ ─ observability/
+│  │  └─ trace.py             # event schema + JSONL/SQLite writer
+│  │
+│  ├ ─ api/app.py              # FastAPI (optional for demo)
+│  └─ cli.py                  # jarvis run | eval
+│
+├ ─ packs/triage/
+│  ├ ─ pack.yaml               # agents and tools for triage
+│  └─ prompts/
+│
+├ ─ eval/                      # BUILD: your differentiator
+│  ├ ─ datasets/ {tasks_v1.jsonl, schema.json}
+│  ├ ─ fixtures/repo_small/    # frozen issues, commits, files
+│  ├ ─ run_eval.py
+│  ├ ─ ablation.py            # LLM-only / Decider-only / Hybrid
+│  ├ ─ sweep_thresholds.py
+│  └─ reports/               # results and charts
+│
+├ ─ app/dashboard.py          # Streamlit: run timeline + eval page
+├ ─ scripts/ {download_decider.sh, seed_fixtures.py}
+├ ─ tests/ {unit/, e2e_mock/}
+├ ─ docs/ {architecture.md, upgrade-to-aws.md, demo-script.md}
+└─ infra/                    # empty placeholder for AWS CDK later
+Repo rule. decision/  and orchestrator/  never import a specific provider or pack
+directly. They use interfaces and config, which keeps the upgrade path real.
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 6 of 9
+
+===== PAGE 7 =====
+Config example
+# configs/cost_free.yaml
+cost_mode: free
+decider: { backend: local_hf, model_id: <from the model card> }
+model:   { provider: ollama, name: <small model that fits your machine> }
+storage: { provider: sqlite, path: ./data/jarvis.db }
+tools:   { servers: [github, fetch] }
+8. Roadmap
+Assumes today is Oct 8 and the build window is Oct 16 to 23. Confirm in the official rules
+whether pre-work before Oct 16 is allowed. If not, treat Phase 0 as research and design
+only.
+Phase 0: Prep (Oct 8 to 15)
+Oct 8 to 9, the gate. Get Decider running locally and make one decision from the model
+card's format. Measure latency on your machine. If it will not run, use a free Colab or
+Kaggle GPU, and develop against the mock  backend meanwhile. Also run the GitHub
+MCP server and make one tool call.
+Oct 10 to 11. Write the 50 eval tasks with expected agent, tool and outcome labels.
+Build one small frozen fixture repo.
+Oct 12 to 13. Skeleton: config, cost guard, trace schema, DeciderProvider  interface
+plus mock  and local_hf , MCP client connecting to existing servers.
+Oct 14. Choose and test the local planner LLM. Confirm it fits your hardware.
+Oct 15. Read the official rules and judging criteria. Pick one AWS touchpoint. Freeze
+scope.
+Phase 1: Build (Oct 16 to 23)
+Oct 16 to 17. One task end to end (plan, D1, D2, execute, D4, synthesize) with traces.
+Oct 18. Second agent, shortlister, D5 safety, D6 and threshold escalation.
+Oct 19 to 20. Run the full eval, the three-way comparison and threshold sweep. Fix the
+worst failure categories.
+Oct 21. Streamlit trace timeline and eval page.
+Oct 22. Deploy the smallest meaningful AWS piece (for example Bedrock as the
+escalation LLM, or one hosted endpoint). Record the demo.
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 7 of 9
+
+===== PAGE 8 =====
+Oct 23. Final eval run, README with real numbers, submit with buffer. AWS's listing
+showed both Oct 23 and Oct 30 as end dates, so treat Oct 23 as the deadline until the
+rules say otherwise.
+Minimum viable submission. If you only finish eval, engine, loop and trace view
+(everything except the AWS piece), you still have a real result: a measured decision engine
+on real tools.
+Phase 2: After the hackathon
+Playbooks (D0) and the info-check decision (D3).
+More agents, a notes or data MCP server, a second pack.
+Learning loop: log human corrections from approvals and recalibrate or fine-tune on
+your own data.
+Embedding-based tool shortlisting.
+Hosted multi-user version on AWS.
+9. Demo script (3 minutes)
+1. 0:00 One-sentence problem and a messy issue list.
+2. 0:20 Type the task and show the live trace: decisions, confidences, one visible
+escalation.
+3. 1:10 Show the drafted comment, not posted.
+4. 1:30 Eval page: three-way comparison, latency and token savings.
+5. 2:15 One failure and the fix that improved the score.
+6. 2:40 Flip the config to the AWS-backed run and close on the upgrade path.
+10. Risks and things to verify
+Risk What to do
+Decider input/output format and loading Read the model card on day one and wrap it
+only in local_hf.py
+Latency on your hardware Measure on Oct 8 to 9; reported figures are for
+a GPU and a Mac laptop
+Moderate Decider accuracy Escalation, thresholds and honest reporting
+Weak local LLM Short prompts, plans of at most 5 steps,
+structured output
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 8 of 9
+
+===== PAGE 9 =====
+11. Definition of done
+make demo  starts the free stack.
+The 50-task eval runs reproducibly and produces the comparison report.
+The live trace shows decisions, confidence and escalation.
+No write action runs without approval.
+The README states real results, including failures.
+Switching COST_MODE  to production works for at least one provider.
+Risk What to do
+Scope creep Two agents, one pack, one user type
+Hackathon rules Read them Oct 15 and adjust
+Accidental AWS charges Budget alert, ALLOW_PAID , check free-tier
+terms
+Prompt injection from issues and web
+pages
+Wrap tool output as untrusted data and block
+instructions found in it
+Jarvis Decider MVP: Architecture, Roadmap and Folder Structure
+Page 9 of 9
