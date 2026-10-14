@@ -64,6 +64,17 @@ class ToolExecutor:
             if not isinstance(definition, ToolDefinition):
                 raise TypeError(f"Invalid tool definition for {name!r}")
 
+    @property
+    def registered_tool_names(self) -> frozenset[str]:
+        """Return a snapshot of registered tool names."""
+        with self._lock:
+            return frozenset(self._tools)
+
+    @property
+    def policy(self) -> SafetyPolicy:
+        """Return the immutable safety policy used by this executor."""
+        return self._policy
+
     def register_tool(self, name: str, definition: ToolDefinition) -> None:
         """Register a tool only when explicitly allowed by the policy."""
         if not isinstance(name, str) or not name.strip():
