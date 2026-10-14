@@ -200,7 +200,6 @@ class GitHubMCPClient:
                 *self._config.command_args,
                 "stdio",
                 "--read-only",
-                "--toolsets=repos",
                 "--tools=list_branches",
             ],
             env=environment,

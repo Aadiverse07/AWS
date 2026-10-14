@@ -1,7 +1,7 @@
 {
   "benchmark": "Jarvis Decider synthetic prototype v1",
   "backend": "local_hf",
-  "dataset": "/Users/aditya/Amazon_Hackathon/jarvis-decider-copy/eval/datasets/tasks_v1.jsonl",
+  "dataset": "eval/datasets/tasks_v1.jsonl",
   "total_tasks": 50,
   "successful_decisions": 50,
   "errors": 0,

@@ -1,29 +1,90 @@
 # Jarvis Decider
 
-A decision-first agent runtime for Jarvis.
+Jarvis Decider is a decision-first agent-runtime prototype. It evaluates
+narrow choices with a specialized decision backend and uses confidence
+thresholds to identify decisions that may need escalation.
 
-The core idea is to use a small decision model for narrow choices and
-escalate to a larger language model only when necessary.
+## Current implementation
 
-## Current Status
+- Provider-independent decision contracts.
+- Mock backend and local Strands Decider backend.
+- Confidence-threshold decision engine with a bounded fallback path.
+- Synthetic 50-task evaluation dataset and evaluation reports.
+- Safety guardrails and argument validation/approval controls for tool execution.
+- Read-only GitHub MCP integration restricted to `list_branches`.
+- JSONL decision tracing.
+- Free-by-default configuration guard.
 
-Phase 1: Decision Core
+This is a prototype, not yet a complete end-to-end autonomous agent task runner.
 
-- Project skeleton: initialized
-- Strands Decider feasibility: verified locally
-- Decision contract: implemented
-- Mock backend: implemented and tested
-- Local Strands Decider backend: implemented and verified with one real inference
-- Unit tests: 21 passing
-- Decision engine and confidence-based escalation: next
-- Evaluation: upcoming
+## Cost configuration
 
-## Cost mode and provider safety
+- `COST_MODE` defaults to `free`.
+- `ALLOW_PAID` defaults to `false`.
+- `COST_MODE=production` requires explicit `ALLOW_PAID=true`.
+- Invalid configuration values are rejected.
 
-The configuration module defaults to `COST_MODE=free`. `COST_MODE=production` is rejected unless `ALLOW_PAID=true` is explicitly set. `ALLOW_PAID` accepts only `true` or `false`, case-insensitively. Do not commit API keys.
+The configuration module validates these settings when loaded. Do not claim
+that all paid-provider startup paths are blocked unless those paths call
+`load_config()` and that behavior has been tested. Do not commit API keys.
 
-**Enforcement limitation:** this module validates configuration only when loaded. Application-wide enforcement is not active until the actual application startup and provider-selection path calls `load_config()` and honors the result. Do not claim paid-provider blocking is enforced before that integration is implemented and tested.
+## Run locally
 
-## Local CLI
+Activate the project's virtual environment, then install the project if
+it has not already been installed:
 
-After installing the project in the active virtual environment, run `jarvis-decider --check-config` to validate environment configuration. `jarvis-decider` starts in mock mode by default; `jarvis-decider --backend local_hf` selects the local Strands Decider backend. The current CLI is a bootstrap/configuration check, not yet an end-to-end agent task runner.
+```bash
+python -m pip install -e ".[dev]"
+
+Validate configuration:
+
+jarvis-decider --check-config
+
+Run the safe mock trace demo:
+
+jarvis-decider --demo-trace \
+  --trace-path /tmp/jarvis-decider-demo.jsonl
+cat /tmp/jarvis-decider-demo.jsonl
+
+The default backend is mock. The --backend local_hf option selects the
+local Strands Decider backend; it may require a model download and additional
+local compute. The CLI currently provides configuration/demo functionality,
+not a full end-to-end agent task runner.
+
+Tests and static checks
+
+python -m pytest -q
+python -m compileall -q src tests eval
+git diff --check
+
+Prototype evaluation
+
+The checked-in reports evaluate 50 synthetic, hand-labeled tasks:
+
+Local Strands Decider: 41/50 correct (82%).
+
+Mock backend: 18/50 correct (36%).
+
+These results are limited to the supplied synthetic dataset and should not
+be interpreted as real-world accuracy. The reported escalation rate is a
+threshold-based estimate only; the evaluation report says that no fallback
+was invoked. Backend completion without errors does not imply correctness.
+
+Latency varies substantially by task and local machine. Report the
+measurement method and distribution, including outliers, when presenting it.
+
+Known limitations
+
+The synthetic evaluation set is small and hand-labeled.
+
+Confidence thresholds are provisional; confidence calibration has not
+been established.
+
+The evaluation measures choice-label agreement and estimated escalation,
+not full end-to-end task completion.
+
+Application-wide paid-provider enforcement requires integration with
+the actual startup/provider-selection path.
+
+Live GitHub branch results depend on the configured repository's actual
+state and permissions.
