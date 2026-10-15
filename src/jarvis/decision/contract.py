@@ -48,8 +48,8 @@ class DecisionResult(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     chosen: str
-    scores: dict[str, float]
-    confidence: float = Field(ge=0.0, le=1.0)
+    scores: dict[str, float] = Field(default_factory=dict)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     latency_ms: float = Field(ge=0.0)
     backend: str = Field(min_length=1)
     escalated: bool = False
@@ -68,9 +68,6 @@ class DecisionResult(BaseModel):
     def scores_must_be_valid_probabilities(
         cls, scores: dict[str, float]
     ) -> dict[str, float]:
-        if not scores:
-            raise ValueError("scores must not be empty")
-
         for option, score in scores.items():
             if not option.strip():
                 raise ValueError("score option names must not be blank")
@@ -83,8 +80,8 @@ class DecisionResult(BaseModel):
 
     @model_validator(mode="after")
     def chosen_must_have_a_score(self) -> "DecisionResult":
-        if self.chosen not in self.scores:
-            raise ValueError("chosen must be a key in scores")
+        if self.scores and self.chosen not in self.scores:
+            raise ValueError("chosen must be a key in scores when scores are provided")
         return self
 
     @field_validator("final_choice", "final_source")

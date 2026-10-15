@@ -227,6 +227,48 @@ def test_missing_threshold_raises_before_any_backend_call():
     assert fallback.calls == 0
 
 
+
+def test_unknown_confidence_calls_fallback_once_and_preserves_primary_result():
+    primary = FakeBackend(
+        "bedrock",
+        choice="developer",
+        confidence=None,
+        scores={},
+        latency_ms=15.0,
+    )
+    fallback = make_fallback(choice="research")
+    engine = DecisionEngine(primary, {"D1": 0.7}, fallback)
+    request = make_request()
+
+    result = engine.decide(request)
+
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert result.escalated is True
+    assert result.chosen == "developer"
+    assert result.confidence is None
+    assert result.scores == {}
+    assert result.final_choice == "research"
+    assert result.final_source == "fallback"
+
+
+def test_unknown_confidence_without_fallback_raises_clear_error():
+    primary = FakeBackend(
+        "bedrock",
+        choice="developer",
+        confidence=None,
+        scores={},
+    )
+    engine = DecisionEngine(primary, {"D1": 0.7})
+
+    with pytest.raises(
+        EscalationUnavailableError,
+        match="confidence is unknown",
+    ):
+        engine.decide(make_request())
+
+    assert primary.calls == 1
+
 def test_low_confidence_without_fallback_raises_clear_error():
     primary = make_primary(confidence=0.4)
     engine = DecisionEngine(primary, {"D1": 0.7})

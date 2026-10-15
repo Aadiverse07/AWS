@@ -42,3 +42,24 @@ def test_cli_demo_trace_rejects_local_backend(monkeypatch, capsys):
     monkeypatch.delenv("ALLOW_PAID", raising=False)
     assert main(["--demo-trace", "--backend", "local_hf"]) == 2
     assert "requires --backend mock" in capsys.readouterr().err
+
+
+def test_cli_blocks_bedrock_by_default(monkeypatch, capsys):
+    monkeypatch.delenv("COST_MODE", raising=False)
+    monkeypatch.delenv("ALLOW_PAID", raising=False)
+    assert main(["--backend", "bedrock"]) == 2
+    assert "requires COST_MODE=production and ALLOW_PAID=true" in capsys.readouterr().err
+
+
+def test_cli_blocks_bedrock_in_free_mode_even_with_paid_flag(monkeypatch, capsys):
+    monkeypatch.setenv("COST_MODE", "free")
+    monkeypatch.setenv("ALLOW_PAID", "true")
+    assert main(["--backend", "bedrock"]) == 2
+    assert "requires COST_MODE=production and ALLOW_PAID=true" in capsys.readouterr().err
+
+
+def test_cli_allows_bedrock_selection_after_explicit_opt_in(monkeypatch, capsys):
+    monkeypatch.setenv("COST_MODE", "production")
+    monkeypatch.setenv("ALLOW_PAID", "true")
+    assert main(["--backend", "bedrock"]) == 0
+    assert "backend=bedrock" in capsys.readouterr().out

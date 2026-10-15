@@ -122,7 +122,10 @@ class DecisionEngine:
 
         primary_result = self.primary.decide(request)
 
-        if primary_result.confidence >= threshold:
+        if (
+            primary_result.confidence is not None
+            and primary_result.confidence >= threshold
+        ):
             return primary_result.model_copy(
                 update={
                     "escalated": False,
@@ -133,11 +136,15 @@ class DecisionEngine:
             )
 
         if self.fallback is None:
+            reason = (
+                "confidence is unknown"
+                if primary_result.confidence is None
+                else f"confidence {primary_result.confidence} is below "
+                f"threshold {threshold}"
+            )
             raise EscalationUnavailableError(
                 f"Decision {request.decision_id!r} needs escalation "
-                f"(confidence {primary_result.confidence} is below "
-                f"threshold {threshold}), but no fallback backend is "
-                f"configured"
+                f"({reason}), but no fallback backend is configured"
             )
 
         fallback_result = self.fallback.decide(request)
