@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from jarvis.decision.backends.mock import MockBackend
 from jarvis.decision.contract import DecisionRequest
@@ -224,3 +225,145 @@ def test_error_trace_failure_does_not_mask_engine_exception(tmp_path):
     with pytest.raises(BackendInvocationError) as caught:
         traced.decide(make_request())
     assert "PRIVATE_EXCEPTION_MESSAGE" not in str(caught.value)
+
+
+def test_bedrock_attempt_and_accepted_fallback_are_distinguishable(tmp_path):
+    import json
+    from jarvis.decision.backends.bedrock import BedrockBackend
+
+    class FakeBedrockClient:
+        def converse(self, **kwargs):
+            return {"output": {"message": {"content": [{"text": '{"chosen":"inspect"}'}]}}}
+
+    bedrock = BedrockBackend(client=FakeBedrockClient(), paid_use_enabled=True)
+    fallback = FixedBackend("mock", "execute", 0.9)
+    path = tmp_path / "bedrock-fallback.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(bedrock, {"D1": 0.6}, fallback), JSONLTraceRecorder(path)
+    )
+
+    result = traced.decide(make_request())
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert result.escalated is True
+    assert result.final_choice == "execute"
+    assert events[0]["event_type"] == "backend_attempt"
+    assert events[0]["backend"] == "bedrock"
+    assert events[0]["request_attempted"] is True
+    assert events[0]["provider_outcome"] == "success"
+    assert events[1]["event_type"] == "decision"
+    assert events[1]["provider_outcome"] == "success"
+    assert events[1]["fallback_invoked"] is True
+    assert events[1]["final_source"] == "mock"
+
+
+def test_bedrock_retry_attempts_are_each_visible_in_trace(tmp_path, monkeypatch):
+    import json
+    from botocore.exceptions import ClientError
+    from jarvis.decision.backends.bedrock import BedrockBackend
+
+    class RetryThenSuccessClient:
+        def __init__(self):
+            self.calls = 0
+
+        def converse(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ClientError(
+                    {"Error": {"Code": "ThrottlingException", "Message": "private"}},
+                    "Converse",
+                )
+            return {"output": {"message": {"content": [{"text": '{"chosen":"inspect"}'}]}}}
+
+    monkeypatch.setattr("jarvis.decision.backends.bedrock.time.sleep", lambda _delay: None)
+    monkeypatch.setattr("jarvis.decision.backends.bedrock.random.uniform", lambda _a, _b: 0)
+    client = RetryThenSuccessClient()
+    path = tmp_path / "bedrock-retry.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(
+            BedrockBackend(client=client, paid_use_enabled=True),
+            {"D1": 0.6},
+            FixedBackend("mock", "execute", 0.9),
+        ),
+        JSONLTraceRecorder(path),
+    )
+
+    result = traced.decide(make_request())
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert result.final_choice == "execute"
+    assert client.calls == 2
+    assert [event["event_type"] for event in events] == [
+        "backend_attempt", "backend_attempt", "decision"
+    ]
+    assert [event["provider_attempt"] for event in events] == [1, 2, None]
+    assert [event["provider_outcome"] for event in events] == [
+        "throttling", "success", "success"
+    ]
+    assert "private" not in path.read_text()
+
+
+def test_bedrock_invalid_response_is_not_traced_with_model_content(tmp_path):
+    import json
+    import pytest
+    from jarvis.decision.backends.bedrock import BedrockBackend
+    from jarvis.decision.engine import BackendInvocationError
+
+    class FakeBedrockClient:
+        def converse(self, **kwargs):
+            return {"output": {"message": {"content": [{"text": "not-json"}]}}}
+
+    path = tmp_path / "bedrock-invalid.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(BedrockBackend(client=FakeBedrockClient(), paid_use_enabled=True), {"D1": 0.6}),
+        JSONLTraceRecorder(path),
+    )
+    with pytest.raises(BackendInvocationError) as caught:
+        traced.decide(make_request())
+    text = path.read_text()
+    events = [json.loads(line) for line in text.splitlines()]
+
+    assert caught.value.provider_outcome == "invalid_response"
+    assert events[0]["event_type"] == "backend_attempt"
+    assert events[0]["status"] == "rejected"
+    assert events[0]["provider_outcome"] == "invalid_response"
+    assert events[0]["request_attempted"] is True
+    assert events[1]["event_type"] == "decision"
+    assert events[1]["status"] == "rejected"
+    assert "not-json" not in text
+    assert "question" not in text
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [("ThrottlingException", "throttling"), ("AccessDeniedException", "authorization")],
+)
+def test_bedrock_provider_failure_class_is_recorded_without_message(
+    tmp_path, code, expected
+):
+    import json
+    import pytest
+    from botocore.exceptions import ClientError
+    from jarvis.decision.backends.bedrock import BedrockBackend
+    from jarvis.decision.engine import BackendInvocationError
+
+    class FakeBedrockClient:
+        def converse(self, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": code, "Message": "SIMULATED_TOKEN_VALUE"}},
+                "Converse",
+            )
+
+    path = tmp_path / f"bedrock-{expected}.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(BedrockBackend(client=FakeBedrockClient(), paid_use_enabled=True), {"D1": 0.6}),
+        JSONLTraceRecorder(path),
+    )
+    with pytest.raises(BackendInvocationError) as caught:
+        traced.decide(make_request())
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert caught.value.provider_outcome == expected
+    assert events[0]["provider_outcome"] == expected
+    assert events[0]["request_attempted"] is True
+    assert events[1]["provider_outcome"] == expected
+    assert "SIMULATED_TOKEN_VALUE" not in path.read_text()

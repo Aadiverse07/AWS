@@ -10,10 +10,12 @@ def test_writes_valid_jsonl_event(tmp_path):
     event = JSONLTraceRecorder(path).record_decision(**sample())
     stored = json.loads(path.read_text().strip())
     assert stored == event
-    assert stored["schema_version"] == 2 and stored["event_type"] == "decision"
+    assert stored["schema_version"] == 3 and stored["event_type"] == "decision"
     assert stored["run_id"] == "run-1" and stored["escalated"] is False
     assert stored["trace_id"] and stored["fallback_invoked"] is False
     assert stored["validation_passed"] is True
+    assert stored["request_attempted"] is None
+    assert stored["provider_outcome"] is None
 
 def test_appends_events(tmp_path):
     path = tmp_path / "events.jsonl"

@@ -8,9 +8,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-config", action="store_true", help="validate config and exit")
     parser.add_argument("--backend", choices=("mock", "local_hf", "bedrock"), default="mock", help="free local backend (default: mock)")
     parser.add_argument("--run-demo", action="store_true", help="run a decision and the safe local task-routing action")
+    parser.add_argument("--record-trace", action="store_true", help="record a sanitized trace for --run-demo")
     parser.add_argument("--demo-trace", action="store_true", help="run one safe mock decision and record a JSONL trace")
     parser.add_argument("--trace-path", default="traces/decisions.jsonl", help="JSONL output path for --demo-trace")
     args = parser.parse_args(argv)
+    if args.record_trace and not args.run_demo:
+        parser.error("--record-trace requires --run-demo")
     try:
         config = load_config()
     except ConfigurationError as exc:
@@ -32,7 +35,10 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from jarvis.application import run_default_demo
 
-            outcome = run_default_demo(args.backend)
+            outcome = run_default_demo(
+                args.backend,
+                trace_path=args.trace_path if args.record_trace else None,
+            )
         except ConfigurationError as exc:
             print(f"Configuration error: {exc}", file=sys.stderr)
             return 2
@@ -65,15 +71,13 @@ def main(argv: list[str] | None = None) -> int:
         result = engine.decide(request)
         print(f"Mock decision recorded: choice={result.final_choice or result.chosen}; trace={args.trace_path}")
         return 0
-    if args.backend == "mock":
-        from jarvis.decision.backends.mock import MockBackend
-        backend = MockBackend()
-    elif args.backend == "local_hf":
-        from jarvis.decision.backends.local_hf import LocalHFBackend
-        backend = LocalHFBackend()
-    else:
-        from jarvis.decision.backends.bedrock import BedrockBackend
-        backend = BedrockBackend()
+    try:
+        from jarvis.application import build_backend
+
+        backend = build_backend(args.backend, config)
+    except ConfigurationError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
     print(f"Jarvis Decider ready: backend={backend.name}; cost_mode={config.cost_mode}")
     print("No task was executed. Use the Python DecisionEngine API to submit a decision request.")
     return 0

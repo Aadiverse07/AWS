@@ -23,11 +23,18 @@ complete autonomous task runner or submission-ready system.
 - `COST_MODE` defaults to `free`.
 - `ALLOW_PAID` defaults to `false`.
 - `COST_MODE=production` requires explicit `ALLOW_PAID=true`.
+- Bedrock selection additionally requires an explicit region via `BEDROCK_REGION`,
+  `AWS_REGION`, or `AWS_DEFAULT_REGION`. `BEDROCK_MODEL_ID` defaults to
+  `amazon.nova-lite-v1:0` and can be set to a supported model or inference profile.
 - Invalid configuration values are rejected.
 
 The configuration module validates these settings when loaded. Do not claim
 that all paid-provider startup paths are blocked unless those paths call
 `load_config()` and that behavior has been tested. Do not commit API keys.
+The app/CLI provider-selection path checks the paid opt-in and region before
+constructing a Bedrock backend; the Bedrock client remains lazy until inference.
+This application guard is not a substitute for IAM restrictions or billing
+alerts.
 
 ## Run locally
 
@@ -76,8 +83,11 @@ cat /tmp/jarvis-decider-demo.jsonl
 
 The default backend is mock. `--backend local_hf --run-demo` selects the
 local Strands Decider backend; inference may require a model download and
-additional local compute. Bedrock requires both `COST_MODE=production` and
-`ALLOW_PAID=true`; the documented default command makes no AWS request.
+additional local compute. Bedrock requires `COST_MODE=production`,
+`ALLOW_PAID=true`, and an explicit region; see
+[`docs/bedrock-smoke-test.md`](docs/bedrock-smoke-test.md) before considering a
+separately authorized real request. The documented default command makes no
+AWS request.
 
 The engine accepts confidence at or above the configured threshold and
 escalates lower or unknown confidence to its fallback once. The demo configures

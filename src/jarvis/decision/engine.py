@@ -68,12 +68,16 @@ class BackendInvocationError(DecisionEngineError):
         backend_role: str,
         error_type: str,
         escalation_reason: str | None = None,
+        provider_outcome: str = "backend_error",
+        request_attempted: bool | None = None,
     ) -> None:
         self.backend_role = backend_role
         self.error_type = error_type
         self.escalation_reason = escalation_reason
+        self.provider_outcome = provider_outcome
+        self.request_attempted = request_attempted
         super().__init__(
-            f"{backend_role.capitalize()} backend failed ({error_type})."
+            f"{backend_role.capitalize()} backend failed ({provider_outcome})."
         )
 
 
@@ -86,10 +90,18 @@ def _invoke_backend(
     try:
         result = backend.decide(request)
     except Exception as exc:
+        provider_outcome = getattr(exc, "category", "backend_error")
+        if not isinstance(provider_outcome, str):
+            provider_outcome = "backend_error"
+        request_attempted = getattr(exc, "request_attempted", None)
+        if request_attempted not in (True, False, None):
+            request_attempted = None
         raise BackendInvocationError(
             backend_role=role,
-            error_type=type(exc).__name__,
+            error_type=getattr(exc, "error_type", type(exc).__name__),
             escalation_reason=escalation_reason,
+            provider_outcome=provider_outcome,
+            request_attempted=request_attempted,
         ) from None
     if not isinstance(result, DecisionResult):
         raise InvalidBackendResultError(

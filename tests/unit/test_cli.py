@@ -16,6 +16,24 @@ def test_cli_runs_end_to_end_mock_demo(monkeypatch, capsys):
     assert "escalated=false" in output
     assert "destination=research" in output
 
+def test_cli_records_trace_for_run_demo(tmp_path, monkeypatch, capsys):
+    import json
+    monkeypatch.setenv("COST_MODE", "free")
+    monkeypatch.setenv("ALLOW_PAID", "false")
+    path = tmp_path / "demo.jsonl"
+    assert main(["--run-demo", "--record-trace", "--trace-path", str(path)]) == 0
+    event = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert event["event_type"] == "decision"
+    assert event["backend"] == "mock"
+    assert "Decision complete" in capsys.readouterr().out
+
+def test_cli_rejects_record_trace_without_run_demo(capsys):
+    import pytest
+    with pytest.raises(SystemExit) as caught:
+        main(["--record-trace"])
+    assert caught.value.code == 2
+    assert "requires --run-demo" in capsys.readouterr().err
+
 def test_cli_blocks_bedrock_demo_before_provider_request(monkeypatch, capsys):
     monkeypatch.delenv("COST_MODE", raising=False)
     monkeypatch.delenv("ALLOW_PAID", raising=False)
@@ -28,7 +46,7 @@ def test_cli_backend_failure_returns_non_success_without_traceback(monkeypatch, 
     monkeypatch.setattr(
         jarvis.application,
         "run_default_demo",
-        lambda backend: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
+        lambda backend, *, trace_path=None: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
     )
     assert main(["--run-demo"]) == 1
     assert "backend unavailable" in capsys.readouterr().err
@@ -86,7 +104,15 @@ def test_cli_blocks_bedrock_in_free_mode_even_with_paid_flag(monkeypatch, capsys
 
 
 def test_cli_allows_bedrock_selection_after_explicit_opt_in(monkeypatch, capsys):
+    import boto3
+
     monkeypatch.setenv("COST_MODE", "production")
     monkeypatch.setenv("ALLOW_PAID", "true")
+    monkeypatch.setenv("BEDROCK_REGION", "us-east-1")
+
+    def forbidden_client(*args, **kwargs):
+        raise AssertionError("readiness must not create an AWS client")
+
+    monkeypatch.setattr(boto3, "client", forbidden_client)
     assert main(["--backend", "bedrock"]) == 0
     assert "backend=bedrock" in capsys.readouterr().out

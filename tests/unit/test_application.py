@@ -117,9 +117,35 @@ def test_bedrock_selection_requires_paid_opt_in_before_construction():
 
 
 def test_paid_opt_in_constructs_bedrock_backend_without_network_client():
-    backend = build_backend("bedrock", AppConfig("production", True))
+    config = AppConfig(
+        "production", True, "us.amazon.nova-lite-v1:0", "us-east-1"
+    )
+    backend = build_backend("bedrock", config)
     assert backend.name == "bedrock"
     assert backend._client is None
+    assert backend.model_id == "us.amazon.nova-lite-v1:0"
+    assert backend.region_name == "us-east-1"
+
+
+def test_paid_opt_in_without_region_fails_before_backend_construction():
+    with pytest.raises(ConfigurationError, match="explicit region"):
+        build_backend("bedrock", AppConfig("production", True))
+
+
+def test_free_mock_demo_does_not_initialize_bedrock(monkeypatch):
+    from jarvis.application import run_default_demo
+    import boto3
+
+    monkeypatch.setenv("COST_MODE", "free")
+    monkeypatch.setenv("ALLOW_PAID", "false")
+
+    def forbidden_client(*args, **kwargs):
+        raise AssertionError("default mock path must not construct an AWS client")
+
+    monkeypatch.setattr(boto3, "client", forbidden_client)
+    outcome = run_default_demo()
+    assert outcome.primary_backend == "mock"
+    assert outcome.action.destination in ROUTING_DESTINATIONS
 
 
 def test_unknown_backend_is_actionable():

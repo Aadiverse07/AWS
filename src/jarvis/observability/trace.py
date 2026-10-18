@@ -21,6 +21,7 @@ _SENSITIVE = re.compile(
     r"(?:api[_-]?key|access[_-]?key|secret|token)\s*[:=])"
 )
 _STATUSES = {"success", "escalated", "rejected", "error"}
+_EVENT_TYPES = {"decision", "backend_attempt"}
 _ESCALATION_REASONS = {None, "below_threshold", "confidence_unavailable"}
 _ERROR_CATEGORIES = {
     None,
@@ -31,6 +32,20 @@ _ERROR_CATEGORIES = {
     "invalid_backend_result",
     "escalation_unavailable",
     "decision_error",
+}
+_PROVIDER_OUTCOMES = {
+    None,
+    "success",
+    "invalid_request",
+    "invalid_response",
+    "timeout",
+    "throttling",
+    "authentication",
+    "authorization",
+    "configuration",
+    "service_unavailable",
+    "network_error",
+    "backend_error",
 }
 
 
@@ -61,7 +76,7 @@ def _safe_number(value: Any, field: str, *, optional: bool = False) -> float | N
 
 
 class JSONLTraceRecorder:
-    """Append a small schema-v2 event containing only allowlisted fields."""
+    """Append schema-v3 decision and Bedrock-attempt events."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -83,10 +98,14 @@ class JSONLTraceRecorder:
         status: str = "success",
         error_type: str | None = None,
         backend_role: str | None = None,
+        event_type: str = "decision",
         fallback_invoked: bool = False,
         escalation_reason: str | None = None,
         validation_passed: bool | None = True,
         error_category: str | None = None,
+        request_attempted: bool | None = None,
+        provider_outcome: str | None = None,
+        provider_attempt: int | None = None,
     ) -> dict[str, Any]:
         if isinstance(step, bool) or not isinstance(step, int) or step < 0:
             raise TraceValidationError("step must be a non-negative integer")
@@ -107,23 +126,38 @@ class JSONLTraceRecorder:
                 raise TraceValidationError(f"{name} must be boolean")
         if validation_passed is not None and not isinstance(validation_passed, bool):
             raise TraceValidationError("validation_passed must be boolean or null")
+        if request_attempted is not None and not isinstance(request_attempted, bool):
+            raise TraceValidationError("request_attempted must be boolean or null")
+        if provider_attempt is not None and (
+            isinstance(provider_attempt, bool)
+            or not isinstance(provider_attempt, int)
+            or provider_attempt < 0
+        ):
+            raise TraceValidationError("provider_attempt must be a non-negative integer or null")
+        if event_type not in _EVENT_TYPES:
+            raise TraceValidationError("unsupported trace event type")
         if status not in _STATUSES:
             raise TraceValidationError("unsupported trace status")
         if escalation_reason not in _ESCALATION_REASONS:
             raise TraceValidationError("unsupported escalation reason")
         if error_category not in _ERROR_CATEGORIES:
             raise TraceValidationError("unsupported error category")
+        if provider_outcome not in _PROVIDER_OUTCOMES:
+            raise TraceValidationError("unsupported provider outcome")
 
         event = {
-            "schema_version": 2,
+            "schema_version": 3,
             "trace_id": str(uuid4()),
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event_type": "decision",
+            "event_type": event_type,
             "run_id": _required_trace_text(run_id, "run_id"),
             "decision_id": _required_trace_text(decision_id, "decision_id"),
             "step": step,
             "backend": _safe_text(backend),
             "backend_role": _safe_text(backend_role),
+            "request_attempted": request_attempted,
+            "provider_outcome": provider_outcome,
+            "provider_attempt": provider_attempt,
             "chosen": _safe_text(chosen),
             "confidence": confidence,
             "threshold": threshold,

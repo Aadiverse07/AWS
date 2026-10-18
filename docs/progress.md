@@ -816,3 +816,37 @@ then test integration boundaries before connecting external tools.
 - Trace writing is append-only but concurrent-write guarantees, retention/rotation, and trace-reader compatibility have not been verified. Schema v2 is an observable format change; consumers should use the documented schema version.
 - The focused tests cover confidence thresholds, malformed decisions, bounded fallback, action gating, error sanitization, trace status/redaction, and the paid-backend construction guard. This does not establish model confidence calibration or live-provider behavior.
 - Day 3 should independently review dataset labels and confidence calibration, evaluate cold-start versus steady-state latency with an explicitly approved repeatable procedure, and plan any live Bedrock validation under separate authorization and AWS IAM/account controls. Day 1/Day 2 do not claim submission readiness.
+
+## 2026-10-18 — Phase 3 Controlled Bedrock Integration
+
+### Repository and implementation audit
+- Verified repository `/Users/aditya/Amazon_Hackathon/jarvis-decider-copy`, branch `master`, clean tree before work, remote `https://github.com/Aadiverse07/AWS.git`, and starting commit `7e15627`.
+- Inspected config, Bedrock adapter, contract/engine, application/CLI, trace path, existing fake-client tests, dependency declarations, README, progress log, and evaluation records. Python 3.12.0, boto3 1.43.114, and botocore 1.43.114 are available in `.venv`.
+- Existing adapter used `bedrock-runtime.converse` with default model `amazon.nova-lite-v1:0`, JSON in `output.message.content[].text`, and `maxTokens=160`; client creation was lazy. Region/model settings were not fully wired from configuration, there was no explicit timeout/retry budget or error taxonomy, and trace events did not expose Bedrock request outcomes. Bedrock confidence was already unknown and therefore used the existing fail-safe fallback.
+- Public AWS documentation checked for the model ID, Converse shape, region/inference-profile guidance, invocation permissions, and pricing reference. This does not verify account-specific model access, region availability, IAM, quotas, or pricing.
+
+### Completed
+- Added validated `BEDROCK_MODEL_ID` and explicit `BEDROCK_REGION` configuration (also accepts `AWS_REGION`/`AWS_DEFAULT_REGION` as region sources). The app/CLI only constructs Bedrock after production mode, `ALLOW_PAID=true`, and region checks. `BedrockBackend` itself defaults to invocation-disabled and requires an explicit boolean opt-in; its boto3 client remains lazy.
+- Configured 5-second connect and 30-second read timeouts, with a maximum of two adapter calls total. Only throttling and service-unavailable outcomes receive one jittered retry; timeout, auth, invalid request, and other failures are not retried. Botocore is configured for one attempt per call so retries remain bounded and explicit.
+- Added a 24,000-byte prompt cap, 160-token output cap, and 8,192-byte response text cap. The Converse response must be a well-formed JSON object with a supplied `chosen` value and optional string rationale. Model-returned confidence/scores are not accepted; normalized confidence remains unknown.
+- Classified timeout, throttling, authentication, authorization, configuration, invalid request/response, service-unavailable, network, and generic backend failures. Errors contain safe categories, not provider messages or payloads; failed calls never fabricate a result.
+- Upgraded JSONL traces to schema v3 with metadata-only Bedrock `backend_attempt` events followed by final decision events. Every `converse` call, including a retry, is recorded with its outcome and attempt number. Traces distinguish client-setup failure, success, invalid response, timeout, throttling, access errors, and fallback/final-decision status without writing prompts or raw provider responses. `--record-trace` is available with `--run-demo`.
+- Added deterministic offline tests using fake Converse clients and Botocore exception/config objects. Tests cover response variants and malformed values, error classification, retryable versus permanent errors, maximum attempts, timeouts, request caps, trace redaction, free-mode blocking, and opt-in construction without a client request.
+- Added [`docs/bedrock-smoke-test.md`](bedrock-smoke-test.md) with account/region/model/IAM/cost/data-handling prerequisites and a manually authorized one-request procedure. Updated README config and trace instructions. No dependency or historical evaluation artifact was changed.
+
+### Verification
+- Baseline before edits: `./.venv/bin/python -m pytest -q` — exit 0, 292 passed.
+- Focused offline tests: `./.venv/bin/python -m pytest -q tests/unit/test_bedrock.py tests/unit/test_config.py tests/unit/test_application.py tests/unit/test_cli.py tests/unit/test_engine.py tests/unit/test_trace.py tests/unit/test_traced_engine.py` — exit 0, 170 passed.
+- Final full suite: `./.venv/bin/python -m pytest -q` — exit 0, 341 passed.
+- `./.venv/bin/python -m compileall -q src tests eval` — exit 0.
+- `git diff --check` — exit 0 after documentation updates.
+- `./.venv/bin/jarvis-decider --run-demo` — exit 0; local mock routed to `research` with no paid provider.
+- `COST_MODE=production ALLOW_PAID=true BEDROCK_REGION=us-east-1 ./.venv/bin/jarvis-decider --backend bedrock` — exit 0 readiness-only path; tests verify no boto3 client was created. This command did not invoke AWS.
+- `COST_MODE=free ALLOW_PAID=true ./.venv/bin/jarvis-decider --backend bedrock` — exit 2 as expected; free mode remains blocked.
+- No live AWS request, Bedrock inference, local-model inference, or paid API call was made.
+
+### Limitations and remaining live-test prerequisites
+- Configuration checks and `paid_use_enabled` are application safeguards, not an AWS security boundary. Enforce least-privilege IAM and spending monitoring independently.
+- AWS account identity/billing readiness, chosen region, model access, region/profile availability, IAM, service quotas, and current token pricing remain unverified. Review the checklist and current AWS references in `docs/bedrock-smoke-test.md`; obtain separate explicit authorization before the documented invocation.
+- The smoke-test flow currently returns unknown Bedrock confidence and accepts a local mock fallback decision. It tests provider transport/response validation, not Bedrock decision accuracy or calibrated confidence. Trace schema v3 is an observable format change; consumers of v2 traces must account for it.
+- No live request, model-based evaluation, or submission-readiness claim is part of Phase 3.

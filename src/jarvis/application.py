@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,9 +75,18 @@ def build_backend(name: str, config: AppConfig) -> DecisionBackend:
         from jarvis.decision.backends.local_hf import LocalHFBackend
 
         return LocalHFBackend()
+    if not config.bedrock_region:
+        raise ConfigurationError(
+            "Bedrock requires an explicit region; set BEDROCK_REGION or "
+            "AWS_DEFAULT_REGION before selecting it."
+        )
     from jarvis.decision.backends.bedrock import BedrockBackend
 
-    return BedrockBackend()
+    return BedrockBackend(
+        model_id=config.bedrock_model_id,
+        region_name=config.bedrock_region,
+        paid_use_enabled=True,
+    )
 
 
 def run_workflow(
@@ -113,7 +123,9 @@ def run_workflow(
     )
 
 
-def run_default_demo(backend_name: str = "mock") -> WorkflowOutcome:
+def run_default_demo(
+    backend_name: str = "mock", *, trace_path: str | Path | None = None
+) -> WorkflowOutcome:
     """Run the documented local task-routing request using app configuration."""
     config = load_config()
     backend = build_backend(backend_name, config)
@@ -121,6 +133,15 @@ def run_default_demo(backend_name: str = "mock") -> WorkflowOutcome:
     # confidence from backends such as Bedrock, never on the default mock path.
     fallback = MockBackend() if backend_name != "mock" else None
     engine = DecisionEngine(backend, {"D1": 0.60}, fallback=fallback)
+    if trace_path is not None:
+        from jarvis.observability.trace import JSONLTraceRecorder
+        from jarvis.observability.traced_engine import TracingDecisionEngine
+
+        decision_engine = TracingDecisionEngine(
+            engine, JSONLTraceRecorder(trace_path)
+        )
+    else:
+        decision_engine = engine
     request = DecisionRequest(
         decision_id="D1",
         question="Choose the best destination for this task.",
@@ -129,4 +150,4 @@ def run_default_demo(backend_name: str = "mock") -> WorkflowOutcome:
         run_id=uuid4().hex,
         step=0,
     )
-    return run_workflow(request, engine)
+    return run_workflow(request, decision_engine)
