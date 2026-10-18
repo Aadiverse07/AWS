@@ -766,3 +766,24 @@ then test integration boundaries before connecting external tools.
 - Synthetic evaluation does not establish real-world accuracy; model confidence is not automatically calibrated.
 - The routing action only returns a structured local result and performs no task execution.
 - Day 1 does not claim submission readiness. Day 2: review dataset labels and confidence policy, improve observability/redaction, and plan separately authorized provider validation.
+
+## 2026-10-18 — Day 1 Synthetic Evaluation and Reporting
+
+### Results
+- Ran `eval/run_eval.py` against `eval/datasets/tasks_v1.jsonl` and `configs/thresholds.yaml` for both `mock` and `local-hf`.
+- Dataset: 50 synthetic cases, T001–T050, across agent selection (8), tool selection (12), result satisfaction (10), safety (10), and escalation (10). Expected choices and rationales are supplied in the JSONL; labels were not independently reviewed for this run.
+- Mock baseline: 18/50 correct (36%), 0 errors; threshold-derived would-escalate 0/50 (0%).
+- Local Strands Decider: 41/50 correct (82%), 0 errors; threshold-derived would-escalate 27/50 (54%).
+- Both backends made 50 successful decisions. The runner recorded latency; local mean 295.691 ms, p50 108.882 ms, p95 126.547 ms. The first-run mean is sensitive to outliers and machine state.
+- The local model loaded cached weights with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`; no weights were downloaded. It used the default MPS device and emitted a reference-kernel fallback notice because `causal_conv1d` was not installed.
+- No live Bedrock calls were made; no evaluation labels, decision logic, or existing reports were changed.
+
+### Artifacts
+- `reports/evaluation/day1_evaluation.md` — methodology, metrics, reproduction commands, and limitations.
+- `reports/evaluation/day1_results.json` — run metadata, dataset hash/composition, all measured metrics, and per-case runner records.
+- `reports/evaluation/day1_accuracy.png` — accuracy comparison chart based on these runs.
+
+### Limitations
+- Accuracy is exact-label agreement on a small synthetic dataset, not real-world accuracy or generalization. Confidence is not calibrated by this evaluation.
+- “Would escalate” is computed from confidence and thresholds; the runner invokes no fallback. No missing-confidence or invalid-output cases occurred, and the dataset has no dedicated cases for those behaviors.
+- Latency is machine/run-specific. Cost was not calculated because the local runs used cached weights and no verified billing assumptions apply.
