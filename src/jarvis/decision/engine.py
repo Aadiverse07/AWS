@@ -28,6 +28,14 @@ class InvalidFallbackChoiceError(DecisionEngineError):
     """The fallback backend chose something that is not a supplied option."""
 
 
+class InvalidPrimaryChoiceError(DecisionEngineError):
+    """The primary backend chose something that is not a supplied option."""
+
+
+class InvalidBackendResultError(DecisionEngineError):
+    """A backend returned a value outside the normalized result contract."""
+
+
 def _validate_threshold(decision_id: str, value: object) -> float:
     """Return ``value`` as a float, or raise ``ValueError`` if it is invalid."""
     # bool is a subclass of int, so it must be rejected explicitly.
@@ -121,6 +129,20 @@ class DecisionEngine:
         threshold = self._threshold_for(request.decision_id)
 
         primary_result = self.primary.decide(request)
+        if not isinstance(primary_result, DecisionResult):
+            raise InvalidBackendResultError(
+                f"Primary backend {self.primary.name!r} returned an invalid result"
+            )
+        if primary_result.chosen not in request.options:
+            raise InvalidPrimaryChoiceError(
+                f"Primary backend {primary_result.backend!r} selected "
+                f"{primary_result.chosen!r}, which is not a supplied option"
+            )
+        if not set(primary_result.scores).issubset(request.options):
+            raise InvalidBackendResultError(
+                f"Primary backend {primary_result.backend!r} returned scores "
+                "for options not supplied in the request"
+            )
 
         if (
             primary_result.confidence is not None
@@ -149,10 +171,20 @@ class DecisionEngine:
 
         fallback_result = self.fallback.decide(request)
 
+        if not isinstance(fallback_result, DecisionResult):
+            raise InvalidBackendResultError(
+                f"Fallback backend {self.fallback.name!r} returned an invalid result"
+            )
+
         if fallback_result.chosen not in request.options:
             raise InvalidFallbackChoiceError(
                 f"Fallback backend {fallback_result.backend!r} selected "
                 f"{fallback_result.chosen!r}, which is not a supplied option"
+            )
+        if not set(fallback_result.scores).issubset(request.options):
+            raise InvalidBackendResultError(
+                f"Fallback backend {fallback_result.backend!r} returned scores "
+                "for options not supplied in the request"
             )
 
         return primary_result.model_copy(

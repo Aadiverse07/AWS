@@ -15,7 +15,8 @@ thresholds to identify decisions that may need escalation.
 - JSONL decision tracing.
 - Free-by-default configuration guard.
 
-This is a prototype, not yet a complete end-to-end autonomous agent task runner.
+The Day 1 local decision workflow is executable. It does not claim to be a
+complete autonomous task runner or submission-ready system.
 
 ## Cost configuration
 
@@ -35,27 +36,50 @@ it has not already been installed:
 
 ```bash
 python -m pip install -e ".[dev]"
+```
 
 Validate configuration:
 
+```bash
 jarvis-decider --check-config
+```
+
+Run the end-to-end mock decision and local routing action:
+
+```bash
+jarvis-decider --run-demo
+```
+
+Expected output identifies the `mock` backend, selected destination,
+escalation status, and local `task_routing` outcome. The action only returns a
+structured result; it does not execute task content, modify files, or use the
+network.
 
 Run the safe mock trace demo:
 
+```bash
 jarvis-decider --demo-trace \
   --trace-path /tmp/jarvis-decider-demo.jsonl
 cat /tmp/jarvis-decider-demo.jsonl
+```
 
-The default backend is mock. The --backend local_hf option selects the
-local Strands Decider backend; it may require a model download and additional
-local compute. The CLI currently provides configuration/demo functionality,
-not a full end-to-end agent task runner.
+The default backend is mock. `--backend local_hf --run-demo` selects the
+local Strands Decider backend; inference may require a model download and
+additional local compute. Bedrock requires both `COST_MODE=production` and
+`ALLOW_PAID=true`; the documented default command makes no AWS request.
+
+The engine accepts confidence at or above the configured threshold and
+escalates lower or unknown confidence to its fallback once. The demo configures
+a local mock fallback for non-mock providers. Backend errors and invalid
+choices stop before the action.
 
 Tests and static checks
 
+```bash
 python -m pytest -q
 python -m compileall -q src tests eval
 git diff --check
+```
 
 Prototype evaluation
 
@@ -83,8 +107,16 @@ been established.
 The evaluation measures choice-label agreement and estimated escalation,
 not full end-to-end task completion.
 
-Application-wide paid-provider enforcement requires integration with
-the actual startup/provider-selection path.
+The application configuration guard protects this backend-selection path;
+AWS IAM permissions and account controls remain separate. No live Bedrock
+request has been verified. Synthetic
+evaluation does not establish real-world accuracy, and model-provided
+confidence is not automatically calibrated. Day 1 does not claim the project
+is submission-ready.
+
+Day 2 should focus on reviewing the synthetic evaluation labels and confidence
+policy, hardening observability/redaction, and planning separately authorized
+live-provider validation under appropriate AWS controls.
 
 Live GitHub branch results depend on the configured repository's actual
 state and permissions.

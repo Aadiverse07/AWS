@@ -7,6 +7,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Jarvis Decider local CLI")
     parser.add_argument("--check-config", action="store_true", help="validate config and exit")
     parser.add_argument("--backend", choices=("mock", "local_hf", "bedrock"), default="mock", help="free local backend (default: mock)")
+    parser.add_argument("--run-demo", action="store_true", help="run a decision and the safe local task-routing action")
     parser.add_argument("--demo-trace", action="store_true", help="run one safe mock decision and record a JSONL trace")
     parser.add_argument("--trace-path", default="traces/decisions.jsonl", help="JSONL output path for --demo-trace")
     args = parser.parse_args(argv)
@@ -27,6 +28,27 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.run_demo:
+        try:
+            from jarvis.application import run_default_demo
+
+            outcome = run_default_demo(args.backend)
+        except ConfigurationError as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            return 2
+        except Exception as exc:
+            # Show controlled error details without a traceback (which could
+            # include request/provider internals); never present failure as success.
+            detail = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
+            print(f"Workflow error: {detail}", file=sys.stderr)
+            return 1
+        print(
+            f"Decision complete: backend={outcome.primary_backend}; "
+            f"choice={outcome.selected}; escalated={str(outcome.escalated).lower()}; "
+            f"source={outcome.final_source}; action={outcome.action.action}; "
+            f"destination={outcome.action.destination}"
+        )
+        return 0
     if args.demo_trace:
         if args.backend != "mock":
             print("Configuration error: --demo-trace requires --backend mock", file=sys.stderr)

@@ -6,6 +6,33 @@ def test_cli_defaults_to_mock_and_validates_config_first(monkeypatch, capsys):
     assert main([]) == 0
     assert "backend=mock" in capsys.readouterr().out
 
+def test_cli_runs_end_to_end_mock_demo(monkeypatch, capsys):
+    monkeypatch.delenv("COST_MODE", raising=False)
+    monkeypatch.delenv("ALLOW_PAID", raising=False)
+    assert main(["--run-demo"]) == 0
+    output = capsys.readouterr().out
+    assert "backend=mock" in output
+    assert "choice=research" in output
+    assert "escalated=false" in output
+    assert "destination=research" in output
+
+def test_cli_blocks_bedrock_demo_before_provider_request(monkeypatch, capsys):
+    monkeypatch.delenv("COST_MODE", raising=False)
+    monkeypatch.delenv("ALLOW_PAID", raising=False)
+    assert main(["--backend", "bedrock", "--run-demo"]) == 2
+    assert "requires COST_MODE=production and ALLOW_PAID=true" in capsys.readouterr().err
+
+def test_cli_backend_failure_returns_non_success_without_traceback(monkeypatch, capsys):
+    import jarvis.application
+
+    monkeypatch.setattr(
+        jarvis.application,
+        "run_default_demo",
+        lambda backend: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
+    )
+    assert main(["--run-demo"]) == 1
+    assert "backend unavailable" in capsys.readouterr().err
+
 def test_cli_rejects_production_before_backend_init(monkeypatch, capsys):
     monkeypatch.setenv("COST_MODE", "production")
     monkeypatch.delenv("ALLOW_PAID", raising=False)

@@ -742,3 +742,27 @@ then test integration boundaries before connecting external tools.
 
 ### Next task
 - Extract and review `FinalAmazonPlan.pdf`, then map each checklist item to implementation and verification evidence before declaring any roadmap day complete.
+# 2026-10-18 — Day 1 Local Decision Workflow
+
+### Completed
+- Inspected repository state at `cbdfc2d`; the working tree was clean before implementation.
+- Confirmed the project virtual environment and ran the existing baseline suite: 234 passed.
+- Added an application workflow that validates a structured request, resolves the selected existing backend, applies the existing one-step confidence escalation engine, validates the final choice, and returns a structured local task-routing outcome.
+- Strengthened the engine to reject malformed backend results, out-of-set primary choices, and scores for options outside the request. Invalid primary output terminates safely without fallback or action execution.
+- Added `jarvis-decider --run-demo`; default path uses only the deterministic mock backend and routes to one allowlisted destination (`research`, `developer`, or `documentation`).
+- Bedrock construction is blocked in the application path without `COST_MODE=production` and `ALLOW_PAID=true`. No AWS request was made.
+- Added focused workflow, backend selection, allowlist, escalation, and CLI tests.
+
+### Verification
+- Baseline: `./.venv/bin/python -m pytest -q` — 234 passed.
+- Focused tests: `./.venv/bin/python -m pytest -q tests/unit/test_application.py tests/unit/test_cli.py tests/unit/test_engine.py` — exit 0, 76 passed.
+- Full suite: `./.venv/bin/python -m pytest -q` — exit 0, 249 passed.
+- Compilation: `./.venv/bin/python -m compileall -q src tests eval` — exit 0.
+- Whitespace check: `git diff --check` — exit 0.
+- Documented mock invocation: `./.venv/bin/jarvis-decider --run-demo` — exit 0; output reported `backend=mock`, `choice=research`, `escalated=false`, and `destination=research`.
+
+### Limitations and Day 2
+- No live Bedrock request has been verified. Configuration is not a substitute for AWS IAM or account controls.
+- Synthetic evaluation does not establish real-world accuracy; model confidence is not automatically calibrated.
+- The routing action only returns a structured local result and performs no task execution.
+- Day 1 does not claim submission readiness. Day 2: review dataset labels and confidence policy, improve observability/redaction, and plan separately authorized provider validation.
