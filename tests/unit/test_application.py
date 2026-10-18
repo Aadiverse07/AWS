@@ -9,7 +9,11 @@ from jarvis.application import (
 from jarvis.config import AppConfig, ConfigurationError
 from jarvis.decision.backends.base import DecisionBackend
 from jarvis.decision.contract import DecisionRequest, DecisionResult
-from jarvis.decision.engine import DecisionEngine, InvalidPrimaryChoiceError
+from jarvis.decision.engine import (
+    BackendInvocationError,
+    DecisionEngine,
+    InvalidPrimaryChoiceError,
+)
 
 
 def request(options=None):
@@ -79,6 +83,25 @@ def test_out_of_set_primary_choice_never_reaches_action_or_fallback():
     assert fallback.calls == 0
 
 
+def test_out_of_set_fallback_choice_never_reaches_action():
+    primary = FixedBackend("primary", "research", 0.1)
+    fallback = FixedBackend("fallback", "unsupported", 1.0)
+    called = []
+
+    class Action:
+        def execute(self, destination):
+            called.append(destination)
+            return TaskRoutingAction().execute(destination)
+
+    from jarvis.decision.engine import InvalidFallbackChoiceError
+
+    engine = DecisionEngine(primary, {"D1": 0.6}, fallback)
+    with pytest.raises(InvalidFallbackChoiceError):
+        run_workflow(request(), engine, action=Action())
+    assert fallback.calls == 1
+    assert called == []
+
+
 def test_unknown_confidence_escalates_once_and_records_it():
     primary = FixedBackend("primary", "research", None)
     fallback = FixedBackend("fallback", "developer", 0.95)
@@ -91,6 +114,12 @@ def test_unknown_confidence_escalates_once_and_records_it():
 def test_bedrock_selection_requires_paid_opt_in_before_construction():
     with pytest.raises(ConfigurationError, match="COST_MODE=production"):
         build_backend("bedrock", AppConfig())
+
+
+def test_paid_opt_in_constructs_bedrock_backend_without_network_client():
+    backend = build_backend("bedrock", AppConfig("production", True))
+    assert backend.name == "bedrock"
+    assert backend._client is None
 
 
 def test_unknown_backend_is_actionable():
@@ -114,7 +143,7 @@ def test_fallback_failure_prevents_action_execution():
     class FailingFallback(FixedBackend):
         def decide(self, req):
             self.calls += 1
-            raise RuntimeError("fallback unavailable")
+            raise RuntimeError("api_key=do-not-log")
 
     fallback = FailingFallback("fallback", "developer", 1.0)
     called = []
@@ -124,10 +153,12 @@ def test_fallback_failure_prevents_action_execution():
             called.append(destination)
             return TaskRoutingAction().execute(destination)
 
-    with pytest.raises(RuntimeError, match="fallback unavailable"):
+    with pytest.raises(BackendInvocationError) as caught:
         run_workflow(
             request(), DecisionEngine(primary, {"D1": 0.6}, fallback), action=Action()
         )
+    assert caught.value.backend_role == "fallback"
+    assert "do-not-log" not in str(caught.value)
     assert fallback.calls == 1
     assert called == []
 
@@ -140,3 +171,26 @@ def test_action_failure_is_not_reported_as_success():
     engine = DecisionEngine(FixedBackend("mock", "research", 1.0), {"D1": 0.6})
     with pytest.raises(OSError, match="local action failed"):
         run_workflow(request(), engine, action=BrokenAction())
+
+
+def test_trace_storage_failure_prevents_action_execution():
+    from jarvis.observability.traced_engine import TracingDecisionEngine
+
+    class BrokenRecorder:
+        def record_decision(self, **kwargs):
+            raise OSError("trace storage unavailable")
+
+    called = []
+
+    class Action:
+        def execute(self, destination):
+            called.append(destination)
+            return TaskRoutingAction().execute(destination)
+
+    traced = TracingDecisionEngine(
+        DecisionEngine(FixedBackend("mock", "research", 1.0), {"D1": 0.6}),
+        BrokenRecorder(),
+    )
+    with pytest.raises(OSError, match="trace storage unavailable"):
+        run_workflow(request(), traced, action=Action())
+    assert called == []

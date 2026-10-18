@@ -5,7 +5,7 @@ import pytest
 import yaml
 
 from jarvis.decision.contract import DecisionResult
-from eval.run_eval import evaluate, load_tasks, load_thresholds, percentile
+from eval.run_eval import evaluate, load_tasks, load_thresholds, percentile, write_report
 
 
 def task(
@@ -42,14 +42,17 @@ def write_yaml(path: Path, data):
 class FixedBackend:
     name = "fixed"
 
-    def __init__(self, chosen="yes", confidence=0.9, error=None):
+    def __init__(self, chosen="yes", confidence=0.9, error=None, result=None):
         self.chosen = chosen
         self.confidence = confidence
         self.error = error
+        self.result = result
 
     def decide(self, request):
         if self.error:
             raise self.error
+        if self.result is not None:
+            return self.result
         return DecisionResult(
             chosen=self.chosen,
             scores={option: 1.0 if option == self.chosen else 0.0
@@ -87,6 +90,21 @@ def test_load_tasks_rejects_invalid_json(tmp_path):
         load_tasks(path)
 
 
+def test_load_tasks_rejects_missing_fields(tmp_path):
+    item = task()
+    del item["rationale"]
+    path = write_jsonl(tmp_path / "tasks.jsonl", [item])
+    with pytest.raises(ValueError, match="missing fields"):
+        load_tasks(path)
+
+
+def test_load_tasks_rejects_non_object_record(tmp_path):
+    path = tmp_path / "tasks.jsonl"
+    path.write_text("42\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON object"):
+        load_tasks(path)
+
+
 def test_load_tasks_rejects_empty_dataset(tmp_path):
     path = tmp_path / "tasks.jsonl"
     path.write_text("\n", encoding="utf-8")
@@ -112,6 +130,18 @@ def test_percentile_uses_nearest_rank():
     assert percentile([], 95) is None
 
 
+@pytest.mark.parametrize("percentage", [-1, 101, float("nan"), True])
+def test_percentile_rejects_invalid_percentage(percentage):
+    with pytest.raises(ValueError, match="percentage"):
+        percentile([1.0, 2.0], percentage)
+
+
+@pytest.mark.parametrize("values", [[float("nan")], [True], ["1"]])
+def test_percentile_rejects_invalid_observations(values):
+    with pytest.raises(ValueError, match="finite numbers"):
+        percentile(values, 50)
+
+
 def test_evaluate_calculates_accuracy_and_escalation():
     tasks = [
         task(task_id="one", expected_choice="yes"),
@@ -131,6 +161,51 @@ def test_evaluate_calculates_accuracy_and_escalation():
     assert report["escalation_policy"]["would_escalate"] == 2
     assert report["escalation_policy"]["rate_over_all_tasks"] == 1.0
     assert report["by_category"]["test"]["correct"] == 1
+    assert report["incorrect"] == 1
+    assert report["accounting"]["successful_plus_errors"] == 2
+    assert report["accounting"]["correct_plus_incorrect"] == 2
+    assert report["actual_fallback_invocations"] == 0
+
+
+def test_evaluate_rejects_empty_cases_without_division_error():
+    with pytest.raises(ValueError, match="empty task list"):
+        evaluate([], FixedBackend(), {"D1": 0.6})
+
+
+def test_unknown_confidence_is_valid_and_counted_as_would_escalate():
+    result = DecisionResult(
+        chosen="yes", scores={}, confidence=None, latency_ms=1.0, backend="fixed"
+    )
+    report = evaluate([task()], FixedBackend(result=result), {"D1": 0.6})
+    record = report["records"][0]
+    assert report["successful_decisions"] == 1
+    assert report["errors"] == 0
+    assert report["escalation_policy"]["would_escalate"] == 1
+    assert record["would_escalate"] is True
+    assert record["escalation_reason"] == "confidence_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("result", "category"),
+    [
+        ({"chosen": "yes"}, "invalid_output"),
+        (
+            DecisionResult(
+                chosen="outside", scores={}, confidence=0.9,
+                latency_ms=1.0, backend="fixed"
+            ),
+            "invalid_output",
+        ),
+    ],
+)
+def test_invalid_backend_output_counts_as_error(result, category):
+    report = evaluate([task()], FixedBackend(result=result), {"D1": 0.6})
+    assert report["successful_decisions"] == 0
+    assert report["errors"] == 1
+    assert report["correct"] == 0
+    assert report["incorrect"] == report["total_tasks"] == 1
+    assert report["validation_failures"] == {category: 1}
+    assert report["records"][0]["error_category"] == category
 
 
 def test_evaluate_records_backend_errors():
@@ -145,6 +220,20 @@ def test_evaluate_records_backend_errors():
     assert report["errors"] == 1
     assert report["correct"] == 0
     assert "RuntimeError" in report["records"][0]["error"]
+    assert report["records"][0]["error_category"] == "backend_error"
+    assert report["latency_ms"]["observation_count"] == 1
+    assert report["latency_ms"]["observation_count"] == 1
+
+
+def test_evaluation_error_record_omits_exception_message():
+    report = evaluate(
+        [task()],
+        FixedBackend(error=RuntimeError("Authorization: Bearer do-not-log")),
+        {"D1": 0.6},
+    )
+    record = report["records"][0]
+    assert record["error"] == "RuntimeError"
+    assert "do-not-log" not in json.dumps(record)
 
 
 def test_evaluate_rejects_missing_threshold():
@@ -161,3 +250,17 @@ def test_evaluate_records_actual_dataset_path(tmp_path):
         dataset_path=dataset,
     )
     assert report["dataset"] == str(dataset)
+
+
+def test_write_report_refuses_input_path_and_existing_file(tmp_path):
+    source = tmp_path / "input.jsonl"
+    source.write_text("preserve", encoding="utf-8")
+    with pytest.raises(ValueError, match="input file"):
+        write_report({"ok": True}, source, protected_paths=(source,))
+    assert source.read_text(encoding="utf-8") == "preserve"
+
+    output = tmp_path / "report.json"
+    output.write_text("existing", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        write_report({"ok": True}, output)
+    assert output.read_text(encoding="utf-8") == "existing"

@@ -50,6 +50,17 @@ Run the end-to-end mock decision and local routing action:
 jarvis-decider --run-demo
 ```
 
+Decision traces use a versioned, allowlisted JSONL schema. See
+[`docs/decision-trace-schema.md`](docs/decision-trace-schema.md) for the fields
+and privacy limits. To audit the retained Day 1 metrics without rerunning a
+backend or changing the historical files:
+
+```bash
+./.venv/bin/python eval/audit_day1.py \
+  --json-output /tmp/jarvis-day2-results.json \
+  --markdown-output /tmp/jarvis-day2-evaluation.md
+```
+
 Expected output identifies the `mock` backend, selected destination,
 escalation status, and local `task_routing` outcome. The action only returns a
 structured result; it does not execute task content, modify files, or use the
@@ -114,9 +125,9 @@ evaluation does not establish real-world accuracy, and model-provided
 confidence is not automatically calibrated. Day 1 does not claim the project
 is submission-ready.
 
-Day 2 should focus on reviewing the synthetic evaluation labels and confidence
-policy, hardening observability/redaction, and planning separately authorized
-live-provider validation under appropriate AWS controls.
+Day 2 reliability and evaluation audit details are in
+[`reports/evaluation/day2_evaluation.md`](reports/evaluation/day2_evaluation.md).
+The historical audit command does not rerun the local model or call Bedrock.
 
 Live GitHub branch results depend on the configured repository's actual
 state and permissions.

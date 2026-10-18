@@ -5,7 +5,9 @@ from jarvis.decision.backends.mock import MockBackend
 from jarvis.decision.contract import DecisionRequest, DecisionResult
 from jarvis.decision.engine import (
     DecisionEngine,
+    BackendInvocationError,
     EscalationUnavailableError,
+    InvalidBackendResultError,
     InvalidFallbackChoiceError,
     MissingThresholdError,
 )
@@ -219,10 +221,11 @@ def test_missing_threshold_raises_before_any_backend_call():
     fallback = make_fallback()
     engine = DecisionEngine(primary, {"D1": 0.7}, fallback)
 
-    with pytest.raises(MissingThresholdError, match="'D2'") as excinfo:
+    with pytest.raises(MissingThresholdError, match="No confidence threshold") as excinfo:
         engine.decide(make_request("D2"))
 
-    assert "'D1'" in str(excinfo.value)
+    assert "D2" not in str(excinfo.value)
+    assert "D1" not in str(excinfo.value)
     assert primary.calls == 0
     assert fallback.calls == 0
 
@@ -284,11 +287,53 @@ def test_fallback_choice_outside_supplied_options_is_rejected():
     fallback = make_fallback(choice="unknown")
     engine = DecisionEngine(primary, {"D1": 0.7}, fallback)
 
-    with pytest.raises(InvalidFallbackChoiceError, match="'unknown'"):
+    with pytest.raises(InvalidFallbackChoiceError) as caught:
         engine.decide(make_request())
 
+    assert "unknown" not in str(caught.value)
     assert primary.calls == 1
     assert fallback.calls == 1
+
+
+def test_engine_revalidates_constructed_result_with_invalid_confidence():
+    class MalformedBackend(FakeBackend):
+        def decide(self, request):
+            self.requests.append(request)
+            return DecisionResult.model_construct(
+                chosen="developer",
+                scores={},
+                confidence=float("nan"),
+                latency_ms=1.0,
+                backend="malformed",
+            )
+
+    primary = MalformedBackend("malformed")
+    fallback = make_fallback()
+    engine = DecisionEngine(primary, {"D1": 0.6}, fallback)
+    with pytest.raises(InvalidBackendResultError):
+        engine.decide(make_request())
+    assert primary.calls == 1
+    assert fallback.calls == 0
+
+
+def test_scores_for_unrequested_options_are_rejected_before_fallback():
+    class MalformedBackend(FakeBackend):
+        def decide(self, request):
+            self.requests.append(request)
+            return DecisionResult(
+                chosen="developer",
+                scores={"developer": 0.5, "secret_option": 0.5},
+                confidence=0.2,
+                latency_ms=1.0,
+                backend="malformed",
+            )
+
+    primary = MalformedBackend("malformed")
+    fallback = make_fallback()
+    engine = DecisionEngine(primary, {"D1": 0.6}, fallback)
+    with pytest.raises(InvalidBackendResultError):
+        engine.decide(make_request())
+    assert fallback.calls == 0
 
 
 # --- Call counts: no retries, loops, or recursion ----------------------------
@@ -318,26 +363,31 @@ def test_each_decide_call_makes_exactly_one_call_per_backend_needed():
     assert fallback.calls == 2
 
 
-def test_primary_failure_propagates_without_retry_or_fallback():
-    primary = make_primary(confidence=0.9, error=RuntimeError("primary down"))
+def test_primary_failure_is_sanitized_without_retry_or_fallback():
+    primary = make_primary(confidence=0.9, error=RuntimeError("api_key=top-secret"))
     fallback = make_fallback()
     engine = DecisionEngine(primary, {"D1": 0.7}, fallback)
 
-    with pytest.raises(RuntimeError, match="primary down"):
+    with pytest.raises(BackendInvocationError) as caught:
         engine.decide(make_request())
 
+    assert caught.value.backend_role == "primary"
+    assert "top-secret" not in str(caught.value)
     assert primary.calls == 1
     assert fallback.calls == 0
 
 
-def test_fallback_failure_propagates_without_retry():
+def test_fallback_failure_is_sanitized_without_retry():
     primary = make_primary(confidence=0.4)
-    fallback = make_fallback(error=RuntimeError("fallback down"))
+    fallback = make_fallback(error=RuntimeError("Authorization: Bearer secret"))
     engine = DecisionEngine(primary, {"D1": 0.7}, fallback)
 
-    with pytest.raises(RuntimeError, match="fallback down"):
+    with pytest.raises(BackendInvocationError) as caught:
         engine.decide(make_request())
 
+    assert caught.value.backend_role == "fallback"
+    assert caught.value.escalation_reason == "below_threshold"
+    assert "secret" not in str(caught.value)
     assert primary.calls == 1
     assert fallback.calls == 1
 

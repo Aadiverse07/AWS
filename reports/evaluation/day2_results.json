@@ -1,0 +1,158 @@
+{
+  "report_schema_version": 1,
+  "report_type": "historical_day1_evaluation_audit",
+  "generated_at_utc": "2026-10-18T14:43:00.118742+00:00",
+  "source_artifact": "reports/evaluation/day1_results.json",
+  "dataset": {
+    "identifier": "tasks_v1",
+    "version": "v1",
+    "path": "eval/datasets/tasks_v1.jsonl",
+    "case_count": 50,
+    "sha256": "735492bacaffcfdd8bbef6a92b60e77290e9ae9bf95df74c5e880ea1f56399a7",
+    "synthetic_hand_labeled": true
+  },
+  "methodology": {
+    "metric_source": "Recomputed from retained per-case Day 1 records; no backend was rerun.",
+    "scoring": "Exact choice match; denominator includes all cases and runner errors.",
+    "fallback": "The Day 1 runner calls primary backends directly; actual fallback invocations are zero. Threshold-derived estimates are separate.",
+    "latency_timer": "Day 1 runner used time.perf_counter around request construction plus backend.decide; lazy local model initialization inside decide is included."
+  },
+  "backends": {
+    "local_hf": {
+      "backend_name": "local_hf",
+      "execution": "local Strands Decider model",
+      "total_cases": 50,
+      "successful_decisions": 50,
+      "incorrect_choices": 9,
+      "runner_errors": 0,
+      "correct_choices": 41,
+      "accuracy": 0.82,
+      "accuracy_denominator": "all dataset cases; runner errors count as incorrect",
+      "case_accounting_valid": true,
+      "categories": {
+        "agent_selection": {
+          "total": 8,
+          "correct": 6,
+          "incorrect_including_errors": 2,
+          "accuracy": 0.75
+        },
+        "escalation": {
+          "total": 10,
+          "correct": 8,
+          "incorrect_including_errors": 2,
+          "accuracy": 0.8
+        },
+        "result_satisfaction": {
+          "total": 10,
+          "correct": 7,
+          "incorrect_including_errors": 3,
+          "accuracy": 0.7
+        },
+        "safety": {
+          "total": 10,
+          "correct": 9,
+          "incorrect_including_errors": 1,
+          "accuracy": 0.9
+        },
+        "tool_selection": {
+          "total": 12,
+          "correct": 11,
+          "incorrect_including_errors": 1,
+          "accuracy": 0.9167
+        }
+      },
+      "actual_fallback_invocations": 0,
+      "threshold_derived_would_escalate_count": 27,
+      "threshold_derived_would_escalate_rate": 0.54,
+      "confidence_unavailable_outputs": 0,
+      "validation_failure_breakdown": null,
+      "latency_audit": {
+        "observation_count": 50,
+        "mean_ms": 295.691,
+        "p50_ms": 108.882,
+        "p95_ms": 126.547,
+        "max_ms": 9374.305,
+        "max_case_id": "T001",
+        "percentile_convention": "Nearest rank: sorted[ceil(p*n)-1]",
+        "matches_stored_summary": true
+      },
+      "backend_genuinely_executed_in_retained_run": true
+    },
+    "mock": {
+      "backend_name": "mock",
+      "execution": "deterministic baseline; always selects the first supplied option",
+      "total_cases": 50,
+      "successful_decisions": 50,
+      "incorrect_choices": 32,
+      "runner_errors": 0,
+      "correct_choices": 18,
+      "accuracy": 0.36,
+      "accuracy_denominator": "all dataset cases; runner errors count as incorrect",
+      "case_accounting_valid": true,
+      "categories": {
+        "agent_selection": {
+          "total": 8,
+          "correct": 3,
+          "incorrect_including_errors": 5,
+          "accuracy": 0.375
+        },
+        "escalation": {
+          "total": 10,
+          "correct": 6,
+          "incorrect_including_errors": 4,
+          "accuracy": 0.6
+        },
+        "result_satisfaction": {
+          "total": 10,
+          "correct": 3,
+          "incorrect_including_errors": 7,
+          "accuracy": 0.3
+        },
+        "safety": {
+          "total": 10,
+          "correct": 1,
+          "incorrect_including_errors": 9,
+          "accuracy": 0.1
+        },
+        "tool_selection": {
+          "total": 12,
+          "correct": 5,
+          "incorrect_including_errors": 7,
+          "accuracy": 0.4167
+        }
+      },
+      "actual_fallback_invocations": 0,
+      "threshold_derived_would_escalate_count": 0,
+      "threshold_derived_would_escalate_rate": 0.0,
+      "confidence_unavailable_outputs": 0,
+      "validation_failure_breakdown": null,
+      "latency_audit": {
+        "observation_count": 50,
+        "mean_ms": 0.004,
+        "p50_ms": 0.003,
+        "p95_ms": 0.005,
+        "max_ms": 0.054,
+        "max_case_id": "T001",
+        "percentile_convention": "Nearest rank: sorted[ceil(p*n)-1]",
+        "matches_stored_summary": true
+      },
+      "backend_genuinely_executed_in_retained_run": true
+    }
+  },
+  "limitations": [
+    "Synthetic hand-labeled cases do not establish real-world accuracy.",
+    "Small sample size; labels were not independently reviewed in this audit.",
+    "Model confidence calibration is not established.",
+    "Latency is machine- and run-dependent; initialization can affect an in-call timing sample.",
+    "No fresh backend run was performed for this audit; values are historical Day 1 records."
+  ],
+  "reliability_test_coverage": [
+    "Valid result and allowlisted action invocation",
+    "Malformed contract values and choices outside supplied options",
+    "High, low, threshold-boundary, and unknown confidence behavior",
+    "Exactly one bounded fallback invocation",
+    "Fallback backend errors and invalid fallback choices stop action execution",
+    "Sanitized trace events distinguish success, escalation, rejection, and failure",
+    "Paid backend selection is blocked before construction without explicit opt-in"
+  ]
+}

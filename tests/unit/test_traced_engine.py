@@ -95,6 +95,9 @@ def test_traced_fallback_records_final_choice_and_source(tmp_path):
     assert event["final_choice"] == "execute"
     assert event["final_source"] == "fallback"
     assert event["status"] == "escalated"
+    assert event["fallback_invoked"] is True
+    assert event["escalation_reason"] == "below_threshold"
+    assert event["validation_passed"] is True
 
 
 def test_traced_engine_records_sanitized_error_when_escalation_is_unavailable(tmp_path):
@@ -113,11 +116,91 @@ def test_traced_engine_records_sanitized_error_when_escalation_is_unavailable(tm
     event = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert event["status"] == "error"
     assert event["error_type"] == "EscalationUnavailableError"
-    assert event["chosen"] == "unavailable"
-    assert event["final_choice"] == "unavailable"
+    assert event["chosen"] is None
+    assert event["final_choice"] is None
+    assert event["fallback_invoked"] is False
+    assert event["escalation_reason"] == "below_threshold"
+    assert event["validation_passed"] is True
     assert "PRIVATE_CONTEXT_SHOULD_NOT_BE_LOGGED" not in path.read_text(encoding="utf-8")
     assert request.question not in path.read_text(encoding="utf-8")
     assert str(caught.value)  # Original exception is still raised.
+
+
+def test_unknown_confidence_trace_records_actual_fallback_and_null_confidence(tmp_path):
+    primary = FixedBackend("primary", "inspect", None)
+    fallback = FixedBackend("fallback", "execute", 0.8)
+    path = tmp_path / "unknown-confidence.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(primary, {"D1": 0.6}, fallback), JSONLTraceRecorder(path)
+    )
+    result = traced.decide(make_request())
+    event = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert result.final_choice == "execute"
+    assert event["confidence"] is None
+    assert event["fallback_invoked"] is True
+    assert event["escalation_reason"] == "confidence_unavailable"
+    assert event["final_choice"] == "execute"
+
+
+def test_fallback_exception_trace_identifies_stage_without_message(tmp_path):
+    import pytest
+    from jarvis.decision.engine import BackendInvocationError
+
+    primary = FixedBackend("primary", "inspect", 0.2)
+
+    class FailingFallback(FixedBackend):
+        def decide(self, request):
+            self.calls += 1
+            raise RuntimeError("AWS_ACCESS_KEY_ID=secret-value")
+
+    fallback = FailingFallback("fallback", "execute", 0.9)
+    path = tmp_path / "fallback-error.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(primary, {"D1": 0.6}, fallback), JSONLTraceRecorder(path)
+    )
+    with pytest.raises(BackendInvocationError) as caught:
+        traced.decide(make_request())
+    text = path.read_text(encoding="utf-8")
+    event = json.loads(text.splitlines()[0])
+    assert "secret-value" not in text and "AWS_ACCESS_KEY_ID" not in text
+    assert "secret-value" not in str(caught.value)
+    assert event["status"] == "error"
+    assert event["error_category"] == "fallback_backend_error"
+    assert event["backend_role"] == "fallback"
+    assert event["fallback_invoked"] is True
+    assert event["escalation_reason"] == "below_threshold"
+
+
+def test_invalid_primary_choice_is_traced_as_rejected(tmp_path):
+    import pytest
+    from jarvis.decision.contract import DecisionResult
+    from jarvis.decision.engine import InvalidPrimaryChoiceError
+
+    class InvalidBackend:
+        name = "primary"
+
+        def decide(self, request):
+            return DecisionResult(
+                chosen="authorization: Bearer secret-value",
+                scores={},
+                confidence=0.9,
+                latency_ms=1.0,
+                backend="primary",
+            )
+
+    path = tmp_path / "rejected.jsonl"
+    traced = TracingDecisionEngine(
+        DecisionEngine(InvalidBackend(), {"D1": 0.6}), JSONLTraceRecorder(path)
+    )
+    with pytest.raises(InvalidPrimaryChoiceError):
+        traced.decide(make_request())
+    text = path.read_text(encoding="utf-8")
+    event = json.loads(text.splitlines()[0])
+    assert "secret-value" not in text
+    assert event["status"] == "rejected"
+    assert event["error_category"] == "invalid_primary_choice"
+    assert event["validation_passed"] is False
+    assert event["fallback_invoked"] is False
 
 
 def test_error_trace_failure_does_not_mask_engine_exception(tmp_path):
@@ -136,5 +219,8 @@ def test_error_trace_failure_does_not_mask_engine_exception(tmp_path):
     engine = DecisionEngine(BrokenBackend(), {"D1": 0.6})
     traced = TracingDecisionEngine(engine, BrokenRecorder())
 
-    with pytest.raises(RuntimeError, match="PRIVATE_EXCEPTION_MESSAGE"):
+    from jarvis.decision.engine import BackendInvocationError
+
+    with pytest.raises(BackendInvocationError) as caught:
         traced.decide(make_request())
+    assert "PRIVATE_EXCEPTION_MESSAGE" not in str(caught.value)

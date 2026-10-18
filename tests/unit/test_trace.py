@@ -10,8 +10,10 @@ def test_writes_valid_jsonl_event(tmp_path):
     event = JSONLTraceRecorder(path).record_decision(**sample())
     stored = json.loads(path.read_text().strip())
     assert stored == event
-    assert stored["schema_version"] == 1 and stored["event_type"] == "decision"
+    assert stored["schema_version"] == 2 and stored["event_type"] == "decision"
     assert stored["run_id"] == "run-1" and stored["escalated"] is False
+    assert stored["trace_id"] and stored["fallback_invoked"] is False
+    assert stored["validation_passed"] is True
 
 def test_appends_events(tmp_path):
     path = tmp_path / "events.jsonl"
@@ -37,3 +39,42 @@ def test_does_not_log_context_or_api_key_fields(tmp_path):
     JSONLTraceRecorder(path).record_decision(**sample())
     data = path.read_text()
     assert "context" not in data and "api_key" not in data and "token" not in data
+
+
+def test_sensitive_values_in_supported_text_fields_are_omitted(tmp_path):
+    path = tmp_path / "events.jsonl"
+    event = JSONLTraceRecorder(path).record_decision(
+        **{
+            **sample(),
+            "chosen": "api_key=secret-value",
+            "backend": "Authorization: Bearer secret-value",
+        }
+    )
+    raw = path.read_text(encoding="utf-8")
+    assert "secret-value" not in raw
+    assert event["chosen"] is None
+    assert event["backend"] is None
+
+
+def test_unknown_confidence_is_serialized_as_null(tmp_path):
+    event = JSONLTraceRecorder(tmp_path / "events.jsonl").record_decision(
+        **{
+            **sample(),
+            "confidence": None,
+            "threshold": None,
+            "escalated": True,
+            "fallback_invoked": True,
+            "escalation_reason": "confidence_unavailable",
+            "status": "escalated",
+        }
+    )
+    assert event["confidence"] is None
+    assert event["threshold"] is None
+    assert event["fallback_invoked"] is True
+
+
+def test_trace_ids_are_unique(tmp_path):
+    recorder = JSONLTraceRecorder(tmp_path / "events.jsonl")
+    first = recorder.record_decision(**sample())
+    second = recorder.record_decision(**sample())
+    assert first["trace_id"] != second["trace_id"]

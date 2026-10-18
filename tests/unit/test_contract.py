@@ -55,7 +55,9 @@ def test_valid_decision_result():
     assert result.escalated is False
 
 
-@pytest.mark.parametrize("confidence", [-0.1, 1.1])
+@pytest.mark.parametrize(
+    "confidence", [-0.1, 1.1, float("nan"), float("inf"), float("-inf"), True]
+)
 def test_result_rejects_invalid_confidence(confidence):
     with pytest.raises(ValidationError):
         DecisionResult(
@@ -74,5 +76,30 @@ def test_result_rejects_negative_latency():
             scores={"developer": 1.0},
             confidence=0.9,
             latency_ms=-1.0,
+            backend="mock",
+        )
+
+
+@pytest.mark.parametrize("latency", [float("nan"), float("inf"), True, "1"])
+def test_result_rejects_malformed_latency(latency):
+    with pytest.raises(ValidationError):
+        DecisionResult(
+            chosen="developer",
+            confidence=0.9,
+            latency_ms=latency,
+            backend="mock",
+        )
+
+
+@pytest.mark.parametrize(
+    "scores", [None, [], {"developer": True}, {"developer": float("nan")}, {" ": 0.5}]
+)
+def test_result_rejects_malformed_scores(scores):
+    with pytest.raises(ValidationError):
+        DecisionResult(
+            chosen="developer",
+            scores=scores,
+            confidence=0.9,
+            latency_ms=1.0,
             backend="mock",
         )

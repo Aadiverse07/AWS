@@ -1,6 +1,7 @@
 """Stable, provider-independent contracts for Jarvis decisions."""
 
 import math
+from collections.abc import Mapping
 
 from pydantic import (
     BaseModel,
@@ -77,6 +78,33 @@ class DecisionResult(BaseModel):
                 )
 
         return scores
+
+    @field_validator("confidence", "latency_ms", mode="before")
+    @classmethod
+    def numeric_fields_must_be_finite_numbers(cls, value: object) -> object:
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("must be a finite number")
+        if not math.isfinite(value):
+            raise ValueError("must be a finite number")
+        return value
+
+    @field_validator("scores", mode="before")
+    @classmethod
+    def score_mapping_must_be_well_formed(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            raise ValueError("scores must be a mapping")
+        for option, score in value.items():
+            if not isinstance(option, str) or not option.strip():
+                raise ValueError("score option names must be non-blank strings")
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                raise ValueError("each score must be a finite number")
+            if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+                raise ValueError(
+                    "each score must be a finite value between 0 and 1"
+                )
+        return value
 
     @model_validator(mode="after")
     def chosen_must_have_a_score(self) -> "DecisionResult":

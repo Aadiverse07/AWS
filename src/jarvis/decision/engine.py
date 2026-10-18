@@ -23,17 +23,90 @@ class MissingThresholdError(DecisionEngineError):
 class EscalationUnavailableError(DecisionEngineError):
     """Escalation is required but no fallback backend is configured."""
 
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
 
 class InvalidFallbackChoiceError(DecisionEngineError):
     """The fallback backend chose something that is not a supplied option."""
+
+    backend_role = "fallback"
+
+    def __init__(self, message: str, *, escalation_reason: str) -> None:
+        super().__init__(message)
+        self.escalation_reason = escalation_reason
 
 
 class InvalidPrimaryChoiceError(DecisionEngineError):
     """The primary backend chose something that is not a supplied option."""
 
+    backend_role = "primary"
+
 
 class InvalidBackendResultError(DecisionEngineError):
     """A backend returned a value outside the normalized result contract."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        backend_role: str,
+        escalation_reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.backend_role = backend_role
+        self.escalation_reason = escalation_reason
+
+
+class BackendInvocationError(DecisionEngineError):
+    """A backend call failed; its arbitrary message is intentionally omitted."""
+
+    def __init__(
+        self,
+        *,
+        backend_role: str,
+        error_type: str,
+        escalation_reason: str | None = None,
+    ) -> None:
+        self.backend_role = backend_role
+        self.error_type = error_type
+        self.escalation_reason = escalation_reason
+        super().__init__(
+            f"{backend_role.capitalize()} backend failed ({error_type})."
+        )
+
+
+def _invoke_backend(
+    backend: DecisionBackend,
+    request: DecisionRequest,
+    role: str,
+    escalation_reason: str | None = None,
+) -> DecisionResult:
+    try:
+        result = backend.decide(request)
+    except Exception as exc:
+        raise BackendInvocationError(
+            backend_role=role,
+            error_type=type(exc).__name__,
+            escalation_reason=escalation_reason,
+        ) from None
+    if not isinstance(result, DecisionResult):
+        raise InvalidBackendResultError(
+            f"{role.capitalize()} backend returned an invalid result structure",
+            backend_role=role,
+            escalation_reason=escalation_reason,
+        )
+    try:
+        # Revalidate even an existing model instance. Backends can use
+        # model_construct() or otherwise bypass normal Pydantic validation.
+        return DecisionResult.model_validate(result.model_dump(mode="python"))
+    except Exception:
+        raise InvalidBackendResultError(
+            f"{role.capitalize()} backend returned a malformed decision result",
+            backend_role=role,
+            escalation_reason=escalation_reason,
+        ) from None
 
 
 def _validate_threshold(decision_id: str, value: object) -> float:
@@ -90,8 +163,9 @@ class DecisionEngine:
 
     Each ``decide`` call makes exactly one primary call and at most one
     fallback call. There are no retries, no loops, and no recursion: the
-    fallback's own confidence is never checked, and backend exceptions
-    propagate unchanged.
+    fallback's own confidence is never checked. Backend exceptions are wrapped
+    in a message-safe ``BackendInvocationError`` that identifies the failing
+    backend role and exception type without retaining its arbitrary message.
     """
 
     def __init__(
@@ -108,10 +182,8 @@ class DecisionEngine:
         try:
             return self._thresholds[decision_id]
         except KeyError:
-            configured = ", ".join(repr(key) for key in sorted(self._thresholds))
             raise MissingThresholdError(
-                f"No confidence threshold configured for decision ID "
-                f"{decision_id!r}. Configured decision IDs: {configured}"
+                "No confidence threshold is configured for this decision"
             ) from None
 
     def threshold_for(self, decision_id: str) -> float:
@@ -128,20 +200,15 @@ class DecisionEngine:
         # Fail on a missing threshold before spending any backend call.
         threshold = self._threshold_for(request.decision_id)
 
-        primary_result = self.primary.decide(request)
-        if not isinstance(primary_result, DecisionResult):
-            raise InvalidBackendResultError(
-                f"Primary backend {self.primary.name!r} returned an invalid result"
-            )
+        primary_result = _invoke_backend(self.primary, request, "primary")
         if primary_result.chosen not in request.options:
             raise InvalidPrimaryChoiceError(
-                f"Primary backend {primary_result.backend!r} selected "
-                f"{primary_result.chosen!r}, which is not a supplied option"
+                "Primary backend selected an option not supplied in the request"
             )
         if not set(primary_result.scores).issubset(request.options):
             raise InvalidBackendResultError(
-                f"Primary backend {primary_result.backend!r} returned scores "
-                "for options not supplied in the request"
+                "Primary backend returned scores for options not supplied in the request",
+                backend_role="primary",
             )
 
         if (
@@ -155,7 +222,7 @@ class DecisionEngine:
                     "final_source": primary_result.backend,
                 },
                 deep=True,
-            )
+        )
 
         if self.fallback is None:
             reason = (
@@ -165,26 +232,33 @@ class DecisionEngine:
                 f"threshold {threshold}"
             )
             raise EscalationUnavailableError(
-                f"Decision {request.decision_id!r} needs escalation "
-                f"({reason}), but no fallback backend is configured"
+                f"Decision needs escalation ({reason}), but no fallback backend is configured",
+                reason=(
+                    "confidence_unavailable"
+                    if primary_result.confidence is None
+                    else "below_threshold"
+                ),
             )
 
-        fallback_result = self.fallback.decide(request)
-
-        if not isinstance(fallback_result, DecisionResult):
-            raise InvalidBackendResultError(
-                f"Fallback backend {self.fallback.name!r} returned an invalid result"
-            )
+        escalation_reason = (
+            "confidence_unavailable"
+            if primary_result.confidence is None
+            else "below_threshold"
+        )
+        fallback_result = _invoke_backend(
+            self.fallback, request, "fallback", escalation_reason
+        )
 
         if fallback_result.chosen not in request.options:
             raise InvalidFallbackChoiceError(
-                f"Fallback backend {fallback_result.backend!r} selected "
-                f"{fallback_result.chosen!r}, which is not a supplied option"
+                "Fallback backend selected an option not supplied in the request",
+                escalation_reason=escalation_reason,
             )
         if not set(fallback_result.scores).issubset(request.options):
             raise InvalidBackendResultError(
-                f"Fallback backend {fallback_result.backend!r} returned scores "
-                "for options not supplied in the request"
+                "Fallback backend returned scores for options not supplied in the request",
+                backend_role="fallback",
+                escalation_reason=escalation_reason,
             )
 
         return primary_result.model_copy(

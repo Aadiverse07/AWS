@@ -787,3 +787,32 @@ then test integration boundaries before connecting external tools.
 - Accuracy is exact-label agreement on a small synthetic dataset, not real-world accuracy or generalization. Confidence is not calibrated by this evaluation.
 - “Would escalate” is computed from confidence and thresholds; the runner invokes no fallback. No missing-confidence or invalid-output cases occurred, and the dataset has no dedicated cases for those behaviors.
 - Latency is machine/run-specific. Cost was not calculated because the local runs used cached weights and no verified billing assumptions apply.
+
+## 2026-10-18 — Day 2 Reliability, Evaluation Integrity, and Decision Tracing
+
+### Completed
+- Hardened the existing decision engine and provider-independent result contract against malformed constructed model results, non-finite/bool numeric values, invalid score mappings, out-of-request choices, and backend exceptions. Backend failures retain their type and stage without exposing arbitrary provider error messages.
+- Kept confidence acceptance at `confidence >= threshold`; low or unknown confidence escalates to the configured fallback exactly once. Invalid primary output is rejected; malformed, invalid, or failed fallback output terminates without reaching the action.
+- Updated JSONL decision traces to schema v2 with unique trace IDs, nullable unknown confidence, threshold, actual fallback invocation, escalation reason, validation status, safe error classification, and sanitized identifiers. Trace records exclude prompts and exception text. A trace-write failure on the successful path prevents the workflow from proceeding to its action.
+- Hardened the synthetic evaluator's result validation, error accounting, unknown-confidence escalation estimate, timing boundary, and non-overwriting report writer. Added `eval/audit_day1.py` to independently audit retained Day 1 per-case records without rerunning a model or replacing the historical Day 1 artifacts.
+- Added a trace schema/privacy note and refreshed the README with the audit reproduction command. No production decision policy, dataset labels, or historical Day 1 outputs were changed.
+
+### Evaluation audit
+- Audited all 50 cases for each backend against the retained Day 1 results and the SHA-256 of `eval/datasets/tasks_v1.jsonl`. Local Strands Decider: 41/50 exact-label matches (82%); deterministic mock baseline: 18/50 (36%). Case counts, category counts, ordering, labels, accuracy, and retained latency summaries were checked against the individual records.
+- These are historical Day 1 measurements. The local model genuinely ran in that retained run, using cached weights; no new inference or download was performed for Day 2. No Bedrock request or paid service was used.
+- Actual fallback invocations in the Day 1 evaluator were zero. Threshold-derived “would escalate” counts are estimates: local 27/50, mock 0/50. The synthetic, hand-labeled set does not establish real-world accuracy; labels were not independently reviewed, and model confidence is not calibrated by this work.
+- Latency audit: local mean 295.691 ms, nearest-rank p50 108.882 ms, p95 126.547 ms, maximum 9,374.305 ms (T001); mock mean 0.004 ms, p50 0.003 ms, p95 0.005 ms, maximum 0.054 ms. Timing observations are historical and machine/run-dependent; the Day 1 timing includes request construction and backend call, including lazy initialization.
+- Artifacts: `reports/evaluation/day2_evaluation.md` and `reports/evaluation/day2_results.json`. The audit command refuses to replace existing output files; pass new paths, as shown in the README, to regenerate it.
+
+### Verification
+- `./.venv/bin/python -m pytest -q` — exit 0, 292 passed.
+- `./.venv/bin/python -m compileall -q src tests eval` — exit 0.
+- `git diff --check` — exit 0.
+- `./.venv/bin/jarvis-decider --run-demo` — exit 0; deterministic mock decision selected `research`, was not escalated, and returned a local `task_routing` outcome.
+- `./.venv/bin/python eval/audit_day1.py --json-output /tmp/jarvis-day2-results-repro.json --markdown-output /tmp/jarvis-day2-report-repro.md` — exit 0; recreated the integrity audit from retained records only.
+- No live Bedrock request, external API call, or fresh local model inference was performed in this Day 2 verification.
+
+### Limitations and Day 3
+- Trace writing is append-only but concurrent-write guarantees, retention/rotation, and trace-reader compatibility have not been verified. Schema v2 is an observable format change; consumers should use the documented schema version.
+- The focused tests cover confidence thresholds, malformed decisions, bounded fallback, action gating, error sanitization, trace status/redaction, and the paid-backend construction guard. This does not establish model confidence calibration or live-provider behavior.
+- Day 3 should independently review dataset labels and confidence calibration, evaluate cold-start versus steady-state latency with an explicitly approved repeatable procedure, and plan any live Bedrock validation under separate authorization and AWS IAM/account controls. Day 1/Day 2 do not claim submission readiness.
