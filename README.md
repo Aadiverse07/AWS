@@ -4,7 +4,7 @@
 
 **Repository:** [Aadiverse07/AWS](https://github.com/Aadiverse07/AWS)
 
-**Live demo:** Not deployed yet. A public URL will be added here only after deployment and public access are verified.
+**Live demo:** [arnova-decider.streamlit.app](https://arnova-decider.streamlit.app/) — deployed on Streamlit Community Cloud and verified from an unauthenticated browser session.
 
 ## Judge summary
 
@@ -170,4 +170,6 @@ Planned work includes a larger independently reviewed evaluation set, confidence
 - Added a judge-facing project explanation, architecture and workflow, setup and demo instructions, evaluation caveats, security and cost guidance, integration status, and roadmap.
 - Added a pinned Streamlit Community Cloud dependency manifest and safe environment example.
 - Updated ignore rules for local AWS and Streamlit credentials and private key files.
+- Deployed the dashboard publicly on Streamlit Community Cloud; included the sanitized five-event historical trace required by the hosted Audit Trail.
+- Fixed Cloud entrypoint import resolution so the dashboard works from Streamlit's script-path execution context.
 - The dashboard, trace-backed decision visualization, guided scenarios, evaluation/audit pages, and CSV exports are included as project functionality; their test results are reported only after the final checks are run.
