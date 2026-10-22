@@ -23,3 +23,4 @@ dist/
 
 # Generated runtime traces
 traces/*.jsonl
+!traces/demo.jsonl
