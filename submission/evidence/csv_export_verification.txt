@@ -1,0 +1,25 @@
+CSV export verification performed against the running local Streamlit app.
+
+Browser: Chrome, http://localhost:8501/
+Provider activity: none; AWS Bedrock was not invoked.
+
+Actual browser download results:
+- /Users/aditya/Downloads/mock_v1_evaluation.csv: 50 rows, 11 columns, UTF-8 BOM, exact byte match against records_to_csv_bytes() for eval/reports/mock_v1.json.
+- /Users/aditya/Downloads/local_hf_v1_evaluation.csv: 50 rows, 11 columns, UTF-8 BOM, exact byte match against records_to_csv_bytes() for eval/reports/local_hf_v1.json.
+- /Users/aditya/Downloads/demo_trace.csv: 5 rows, 16 columns, UTF-8 BOM, exact byte match against records_to_csv_bytes() for events loaded from traces/demo.jsonl; zero invalid-line warnings.
+
+Browser search check:
+- unmatched-event-xyz -> “Showing 0 of 5 trace events” and the no-match message.
+- cleared search -> “Showing 5 of 5 trace events”.
+
+Automated checks:
+- ./.venv/bin/python -m pytest -q tests/unit/test_dashboard_export.py -> 13 passed.
+- ./.venv/bin/python -m pytest -q -> 354 passed in 1.36s, 0 failures.
+- ./.venv/bin/python -m compileall -q src tests eval app -> exit 0.
+- git diff --check -> exit 0.
+- curl to / and /_stcore/health -> both HTTP 200.
+
+Browser console note: post-reload Chrome logs included WebSocket onclose and
+health-poll no-response errors. Direct health navigation displayed "ok" and
+the actual dashboard CSV download actions succeeded. This diagnostic remains
+unresolved and is documented as FAIL in the QA report.

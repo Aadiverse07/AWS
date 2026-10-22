@@ -8,6 +8,12 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.aws/
+.streamlit/secrets.toml
+*.pem
+*.key
+*.p12
+*.pfx
 *.log
 
 # Python build artifacts

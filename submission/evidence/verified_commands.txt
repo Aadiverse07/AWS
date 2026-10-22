@@ -1,0 +1,28 @@
+Evidence captured from this rescue run. The complete output was inspected in the active terminal; this file preserves the concise, sanitized results.
+
+$ ./.venv/bin/python -m pytest -q
+........................................................................ [ 21%]
+........................................................................ [ 42%]
+........................................................................ [ 63%]
+........................................................................ [ 84%]
+.....................................................                    [100%]
+341 passed in 1.39s
+
+$ ./.venv/bin/python -m compileall -q src tests eval app
+exit 0; no output
+
+$ ./.venv/bin/jarvis-decider --check-config
+Configuration valid: COST_MODE=free; ALLOW_PAID=false
+
+$ ./.venv/bin/jarvis-decider --run-demo
+Decision complete: backend=mock; choice=research; escalated=false; source=mock; action=task_routing; destination=research
+
+$ curl -fsS -o /tmp/jarvis-dashboard-response.html -w 'HTTP %{http_code}; content-type %{content_type}; downloaded %{size_download} bytes\n' http://127.0.0.1:8501/
+HTTP 200; content-type text/html; charset=utf-8; downloaded 6463 bytes
+
+Browser observation after the dashboard compatibility fix: page title “Jarvis Decider”; mock_v1 and local_hf_v1 reports displayed; five trace rows, five total events, zero escalations, zero error events; search and CSV download controls visible. Browser console warning and error query returned an empty list. The server stopped cleanly without the prior dataframe deprecation warning.
+
+$ git diff --check
+exit 0; no output
+
+No credentials, environment-file contents, raw provider errors, or personal records are included. No AWS request was made.

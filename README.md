@@ -1,143 +1,173 @@
-# Jarvis Decider
+# Arnova Decider
 
-Jarvis Decider is a decision-first agent-runtime prototype. It evaluates
-narrow choices with a specialized decision backend and uses confidence
-thresholds to identify decisions that may need escalation.
+**An explainable decision engine for controlled AI workflows.** Arnova accepts a bounded decision request, validates its allowed choices, asks a backend to propose a route, applies a confidence threshold, and records the result. A low-confidence result can invoke one configured fallback; backend errors stop before the routing action.
 
-## Current implementation
+**Repository:** [Aadiverse07/AWS](https://github.com/Aadiverse07/AWS)
 
-- Provider-independent decision contracts.
-- Mock backend and local Strands Decider backend.
-- Confidence-threshold decision engine with a bounded fallback path.
-- Synthetic 50-task evaluation dataset and evaluation reports.
-- Safety guardrails and argument validation/approval controls for tool execution.
-- Read-only GitHub MCP integration restricted to `list_branches`.
-- JSONL decision tracing.
-- Free-by-default configuration guard.
+**Live demo:** Not deployed yet. A public URL will be added here only after deployment and public access are verified.
 
-The Day 1 local decision workflow is executable. It does not claim to be a
-complete autonomous task runner or submission-ready system.
+## Judge summary
 
-## Cost configuration
+The live dashboard is designed to be usable without cloud credentials. Its interactive workflow uses deterministic mock and fixture backends, and labels that mode clearly. Judges can explore the normal path, a low-confidence fallback, and a safe backend-error path; inspect trace evidence; review the historical synthetic benchmarks and audit trail; and download CSV exports. It records a routing result only; it does not execute task content. Bedrock is an opt-in adapter in the codebase, but this public demo does not call AWS and live behavior has not been verified.
 
-- `COST_MODE` defaults to `free`.
-- `ALLOW_PAID` defaults to `false`.
-- `COST_MODE=production` requires explicit `ALLOW_PAID=true`.
-- Bedrock selection additionally requires an explicit region via `BEDROCK_REGION`,
-  `AWS_REGION`, or `AWS_DEFAULT_REGION`. `BEDROCK_MODEL_ID` defaults to
-  `amazon.nova-lite-v1:0` and can be set to a supported model or inference profile.
-- Invalid configuration values are rejected.
+## Problem and proposed solution
 
-The configuration module validates these settings when loaded. Do not claim
-that all paid-provider startup paths are blocked unless those paths call
-`load_config()` and that behavior has been tested. Do not commit API keys.
-The app/CLI provider-selection path checks the paid opt-in and region before
-constructing a Bedrock backend; the Bedrock client remains lazy until inference.
-This application guard is not a substitute for IAM restrictions or billing
-alerts.
+AI workflows often make routing or delegation choices without showing the policy or evidence behind them. Arnova puts a small, inspectable control layer around those decisions: validate inputs and allowed destinations, evaluate a backend response against explicit confidence policy, bound fallback to one attempt, stop safely on errors, and preserve a sanitized audit event.
 
-## Run locally
+The core design principle is **evidence travels with the outcome**. The dashboard's decision tree is derived from the actual workflow result and trace fields rather than a decorative, hard-coded success path.
 
-Activate the project's virtual environment, then install the project if
-it has not already been installed:
+## What is implemented
 
-```bash
-python -m pip install -e ".[dev]"
+- A provider-independent decision request/result contract and decision engine.
+- Deterministic mock and local Strands Decider backend paths.
+- Threshold-based acceptance and a bounded, one-time fallback path.
+- Safe task-routing action with an allowlist; it returns a structured route and does not execute task instructions.
+- Versioned, allowlisted JSONL decision tracing and a historical audit view.
+- Streamlit dashboard with Guided Demo, Evaluation Lab, and Audit Trail pages.
+- Three deterministic scenarios: standard mock, low-confidence fallback fixture, and backend-error fixture.
+- Synthetic benchmark reports and CSV downloads for evaluation records and historical or interactive traces.
+- Cost-safety configuration and an opt-in, lazy AWS Bedrock adapter.
+- Read-only GitHub MCP functionality limited to listing repository branches.
+
+The dashboard currently runs the local deterministic demo path. It does not connect to Figma or Claude, and does not expose an authenticated live-model service.
+
+## Workflow and architecture
+
+```text
+Dashboard / CLI
+      │
+      ▼
+DecisionRequest validation ── destination allowlist
+      │
+      ▼
+Primary backend proposes a choice + confidence
+      │
+      ▼
+DecisionEngine compares confidence with configured threshold
+   ┌──┴───────────────────────────────┐
+   │ confidence meets threshold       │ low / unavailable confidence
+   ▼                                  ▼
+accept primary choice            invoke fallback once
+   └────────────────┬─────────────────┘
+                    ▼
+       TaskRoutingAction returns route
+                    │
+                    ▼
+       Sanitized JSONL trace / audit
+
+Backend error or invalid choice ──► stop safely; no routing action
 ```
 
-Validate configuration:
+The runtime separates contracts, backend adapters, policy, actions, and observability. See [`src/jarvis`](src/jarvis), [`app/dashboard.py`](app/dashboard.py), [`app/demo_workflow.py`](app/demo_workflow.py), and the [trace schema](docs/decision-trace-schema.md). The interactive dashboard writes its run trace to a temporary local file and displays the resulting event; the checked-in historical trace is a separate audit dataset.
+
+## Evaluation and how to read it
+
+The checked-in reports cover **50 synthetic, hand-labeled tasks per backend**. They measure exact-choice label agreement on that dataset:
+
+| Report | Exact-label matches | Interpretation |
+|---|---:|---|
+| Mock | 18/50 (36%) | Baseline behavior on the supplied synthetic tasks |
+| Local Strands Decider | 41/50 (82%) | Recorded local-model benchmark result |
+
+These are historical results, not a live model evaluation or evidence of real-world accuracy. The estimated escalation rate is computed from confidence and threshold; the report does not claim that a fallback was actually invoked during those benchmark runs. Latency is also historical and machine-dependent. The Evaluation Lab labels the data and exports accordingly. Source reports are in [`eval/reports`](eval/reports), and the audit methodology is documented in [`reports/evaluation/day2_evaluation.md`](reports/evaluation/day2_evaluation.md).
+
+## Technology and repository map
+
+- Python 3.11 or newer; Pydantic; PyYAML; boto3.
+- Streamlit for the dashboard; pytest for the test suite.
+- Optional local Strands Decider path; opt-in AWS Bedrock adapter.
+
+```text
+app/                  Streamlit dashboard and deterministic demo workflow
+src/jarvis/           Decision contracts, engine, backends, actions, tracing, CLI
+eval/                 Synthetic datasets, reports, evaluation and audit scripts
+docs/                 Trace schema and Bedrock smoke-test guidance
+reports/               Evaluation audit documentation
+submission/            Delivery notes, demo script, and verification evidence
+tests/                 Unit and integration tests
+traces/                Checked-in historical demo trace
+```
+
+## Install and run
+
+### macOS, Linux, and Windows
+
+Install Python 3.11+ and Git. From the repository root:
+
+```bash
+python -m venv .venv
+# macOS / Linux
+source .venv/bin/activate
+# Windows PowerShell instead: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev,dashboard]"
+```
+
+Start the dashboard:
+
+```bash
+streamlit run app/dashboard.py
+```
+
+Run the CLI mock workflow and configuration check:
 
 ```bash
 jarvis-decider --check-config
-```
-
-Run the end-to-end mock decision and local routing action:
-
-```bash
 jarvis-decider --run-demo
 ```
 
-Decision traces use a versioned, allowlisted JSONL schema. See
-[`docs/decision-trace-schema.md`](docs/decision-trace-schema.md) for the fields
-and privacy limits. To audit the retained Day 1 metrics without rerunning a
-backend or changing the historical files:
+The default backend is mock. A safe trace demo writes only to the chosen local path:
 
 ```bash
-./.venv/bin/python eval/audit_day1.py \
-  --json-output /tmp/jarvis-day2-results.json \
-  --markdown-output /tmp/jarvis-day2-evaluation.md
+jarvis-decider --demo-trace --trace-path /tmp/arnova-demo.jsonl
 ```
 
-Expected output identifies the `mock` backend, selected destination,
-escalation status, and local `task_routing` outcome. The action only returns a
-structured result; it does not execute task content, modify files, or use the
-network.
+The dashboard's three guided scenarios are selected in the Guided Demo page. Choose a scenario, optionally edit the task and preferred route, select **Run Guided Demo**, and inspect the highlighted branch and trace. The standard run accepts the primary mock result; the fixture run falls back once; the error fixture stops without a routing action. Evaluation Lab and Audit Trail provide record inspection and CSV downloads.
 
-Run the safe mock trace demo:
-
-```bash
-jarvis-decider --demo-trace \
-  --trace-path /tmp/jarvis-decider-demo.jsonl
-cat /tmp/jarvis-decider-demo.jsonl
-```
-
-The default backend is mock. `--backend local_hf --run-demo` selects the
-local Strands Decider backend; inference may require a model download and
-additional local compute. Bedrock requires `COST_MODE=production`,
-`ALLOW_PAID=true`, and an explicit region; see
-[`docs/bedrock-smoke-test.md`](docs/bedrock-smoke-test.md) before considering a
-separately authorized real request. The documented default command makes no
-AWS request.
-
-The engine accepts confidence at or above the configured threshold and
-escalates lower or unknown confidence to its fallback once. The demo configures
-a local mock fallback for non-mock providers. Backend errors and invalid
-choices stop before the action.
-
-Tests and static checks
+### Checks
 
 ```bash
 python -m pytest -q
-python -m compileall -q src tests eval
+python -m compileall -q src app tests eval
 git diff --check
 ```
 
-Prototype evaluation
+## Configuration and cost safety
 
-The checked-in reports evaluate 50 synthetic, hand-labeled tasks:
+The application defaults to free/mock operation. Safe example values are in [`.env.example`](.env.example); copy and adjust only values needed for a local run. Never commit real credentials.
 
-Local Strands Decider: 41/50 correct (82%).
+| Variable | Default / purpose |
+|---|---|
+| `COST_MODE` | `free`; paid mode requires explicit production configuration |
+| `ALLOW_PAID` | `false`; explicit opt-in required for paid provider selection |
+| `BEDROCK_REGION` | No default; required to select Bedrock (or use standard AWS region variables) |
+| `BEDROCK_MODEL_ID` | `amazon.nova-lite-v1:0`; configurable model ID or supported inference profile |
 
-Mock backend: 18/50 correct (36%).
+Do not put AWS keys in `.env`, Streamlit secrets, source, or screenshots. If a separate, authorized Bedrock evaluation is ever performed, use the standard AWS credential provider chain or an approved role, a dedicated region, and least-privilege IAM access. Apply account-level budgets and monitoring. The application guard does not replace IAM policy or billing controls. This delivery and the hosted mock demo make no AWS request.
 
-These results are limited to the supplied synthetic dataset and should not
-be interpreted as real-world accuracy. The reported escalation rate is a
-threshold-based estimate only; the evaluation report says that no fallback
-was invoked. Backend completion without errors does not imply correctness.
+## AWS Bedrock status and verification plan
 
-Latency varies substantially by task and local machine. Report the
-measurement method and distribution, including outliers, when presenting it.
+An opt-in backend adapter is present. Provider selection is guarded by paid-mode opt-in and region configuration, and the client is lazy until inference. **No live Bedrock request was made or verified for this delivery.** The hosted judge demo remains functional with no AWS credentials.
 
-Known limitations
+For a separately approved smoke test, first review [`docs/bedrock-smoke-test.md`](docs/bedrock-smoke-test.md), choose an allowed model and region, provide credentials through the standard AWS provider chain, confirm least-privilege `bedrock:InvokeModel` access for only the intended model/profile, and explicitly enable paid mode. Monitor cost and remove temporary access afterward. Never create or distribute reusable AWS keys for judges. A future judge-facing live inference service would require separate authentication, quotas, monitoring, and budget safeguards.
 
-The synthetic evaluation set is small and hand-labeled.
+## Integrations and roadmap
 
-Confidence thresholds are provisional; confidence calibration has not
-been established.
+The current GitHub MCP client is read-only and supports `list_branches`; it does not create branches, commits, or pull requests. AWS Bedrock is adapter-present but live-unverified. Figma and Claude integrations are future possibilities, not current capabilities. Any future tool integration should use explicit permissions, narrow actions, approval gates where appropriate, and auditable traces.
 
-The evaluation measures choice-label agreement and estimated escalation,
-not full end-to-end task completion.
+Planned work includes a larger independently reviewed evaluation set, confidence calibration, stronger end-to-end workflow measures, deployment monitoring, and governed integrations. Current limitations include a small synthetic benchmark, provisional confidence thresholds, no demonstrated calibration, no live Bedrock verification, and no autonomous execution of task content.
 
-The application configuration guard protects this backend-selection path;
-AWS IAM permissions and account controls remain separate. No live Bedrock
-request has been verified. Synthetic
-evaluation does not establish real-world accuracy, and model-provided
-confidence is not automatically calibrated. Day 1 does not claim the project
-is submission-ready.
+## Security and privacy
 
-Day 2 reliability and evaluation audit details are in
-[`reports/evaluation/day2_evaluation.md`](reports/evaluation/day2_evaluation.md).
-The historical audit command does not rerun the local model or call Bedrock.
+- Demo inputs are processed in the Streamlit session; the workflow records routing decisions, not task execution.
+- Trace fields follow an allowlisted schema; inspect [`docs/decision-trace-schema.md`](docs/decision-trace-schema.md) for field and privacy limits.
+- Mock and fixture scenarios require no credentials and perform no paid inference.
+- `.gitignore` excludes local environments, secret files, caches, and generated runtime traces.
+- Do not enter sensitive personal, customer, or credential data into the public demo.
 
-Live GitHub branch results depend on the configured repository's actual
-state and permissions.
+## Changelog — delivery
+
+- Added a judge-facing project explanation, architecture and workflow, setup and demo instructions, evaluation caveats, security and cost guidance, integration status, and roadmap.
+- Added a pinned Streamlit Community Cloud dependency manifest and safe environment example.
+- Updated ignore rules for local AWS and Streamlit credentials and private key files.
+- The dashboard, trace-backed decision visualization, guided scenarios, evaluation/audit pages, and CSV exports are included as project functionality; their test results are reported only after the final checks are run.
