@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import json
 import html
+import sys
 from pathlib import Path
 
 import streamlit as st
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from app.dashboard_data import (
     CSV_MIME_TYPE,
     csv_filename,
@@ -22,7 +28,6 @@ from app.demo_workflow import (
     workflow_tree_state,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 REPORTS = (
     ROOT / "eval/reports/mock_v1.json",
     ROOT / "eval/reports/local_hf_v1.json",
