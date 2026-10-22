@@ -4,7 +4,7 @@
 
 **Repository:** [Aadiverse07/AWS](https://github.com/Aadiverse07/AWS)
 
-**Live demo:** [arnova-decider.streamlit.app](https://arnova-decider.streamlit.app/) — deployed on Streamlit Community Cloud and verified from an unauthenticated browser session.
+**Live demo:** [arnova-decider.onrender.com](https://arnova-decider.onrender.com/) — deployed on Render and verified from a public browser session. The previous Streamlit Community Cloud deployment may remain available separately.
 
 ## Judge summary
 
@@ -32,6 +32,8 @@ The core design principle is **evidence travels with the outcome**. The dashboar
 The dashboard currently runs the local deterministic demo path. It does not connect to Figma or Claude, and does not expose an authenticated live-model service.
 
 ## Workflow and architecture
+
+The hosted application uses the same single-service Streamlit architecture as local development. Render runs the dashboard and decision workflow together in one free Python web service; no separate API service or database is required. `render.yaml` is the deployment source of truth, and `.python-version` pins the Render runtime to Python 3.12.11. The service binds to Render's assigned `$PORT` on `0.0.0.0` and uses Streamlit's `/_stcore/health` endpoint for deployment health checks. Free instances can spin down after inactivity, so the first request after idle time may take longer.
 
 ```text
 Dashboard / CLI
@@ -132,6 +134,12 @@ python -m compileall -q src app tests eval
 git diff --check
 ```
 
+Latest delivery verification: **364 tests passed**; `compileall`, `pip check`, Render Blueprint YAML validation, and `git diff --check` passed. The Render build and health check succeeded. Public checks verified all three guided scenarios, Evaluation Lab and Audit Trail rendering, and evaluation and historical-trace CSV downloads. The public demo uses deterministic fixtures and synthetic data; no AWS Bedrock request was made.
+
+### Render deployment
+
+The repository deploys as one Blueprint-managed web service named `arnova-decider` from `master` using the root [`render.yaml`](render.yaml). Connect the GitHub repository to Render, import the Blueprint, and allow it to create the service. Future pushes to `master` are synced through the Blueprint. The service uses `requirements.txt`, the Python version in `.python-version`, and the startup command in `render.yaml`. It runs with `COST_MODE=free` and `ALLOW_PAID=false`; no credentials or Bedrock configuration are needed for the public demo.
+
 ## Configuration and cost safety
 
 The application defaults to free/mock operation. Safe example values are in [`.env.example`](.env.example); copy and adjust only values needed for a local run. Never commit real credentials.
@@ -171,5 +179,6 @@ Planned work includes a larger independently reviewed evaluation set, confidence
 - Added a pinned Streamlit Community Cloud dependency manifest and safe environment example.
 - Updated ignore rules for local AWS and Streamlit credentials and private key files.
 - Deployed the dashboard publicly on Streamlit Community Cloud; included the sanitized five-event historical trace required by the hosted Audit Trail.
+- Added a Render Blueprint, pinned Python 3.12.11, and deployed the single-service app on Render at [arnova-decider.onrender.com](https://arnova-decider.onrender.com/); verified scenarios, reports, audit trail, health endpoint, and CSV downloads.
 - Fixed Cloud entrypoint import resolution so the dashboard works from Streamlit's script-path execution context.
 - The dashboard, trace-backed decision visualization, guided scenarios, evaluation/audit pages, and CSV exports are included as project functionality; their test results are reported only after the final checks are run.
